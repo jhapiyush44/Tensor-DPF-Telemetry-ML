@@ -12,16 +12,22 @@ from sklearn.metrics import (
     f1_score
 )
 
+
 DATA_PATH = Path("data/features.parquet")
 MODEL_DIR = Path("models")
 MODEL_DIR.mkdir(exist_ok=True)
 
 
-# -------------------------------------------------
-# Main training
-# -------------------------------------------------
+# =================================================
+# Training
+# =================================================
 
 def main():
+
+    if not DATA_PATH.exists():
+        raise FileNotFoundError(
+            "features.parquet not found. Run feature_engineering.py first."
+        )
 
     print("Loading features...")
 
@@ -34,11 +40,11 @@ def main():
 
     split_date = df["timestamp"].quantile(0.9)
 
-    train = df[df["timestamp"] < split_date]
-    test = df[df["timestamp"] >= split_date]
+    train = df[df["timestamp"] < split_date].copy()
+    test = df[df["timestamp"] >= split_date].copy()
 
-    print("Train size:", len(train))
-    print("Test size :", len(test))
+    print(f"Train size: {len(train):,}")
+    print(f"Test size : {len(test):,}")
 
     # -------------------------------------------------
     # Features
@@ -55,9 +61,14 @@ def main():
     y_train_clf = train["regen_needed"]
     y_test_clf = test["regen_needed"]
 
-    # ⭐ save schema for inference
+    # save schema for inference
     feature_cols = X_train.columns.tolist()
     joblib.dump(feature_cols, MODEL_DIR / "feature_cols.pkl")
+
+    # enforce consistent ordering
+    X_test = X_test[feature_cols]
+
+    print(f"Number of features: {len(feature_cols)}")
 
     # -------------------------------------------------
     # Regression
@@ -81,7 +92,7 @@ def main():
     print("MAE:", mae)
     print("R2 :", r2)
 
-    joblib.dump(reg, MODEL_DIR / "regressor.pkl")
+    joblib.dump(reg, MODEL_DIR / "regressor.pkl", compress=3)
 
     # -------------------------------------------------
     # Classification
@@ -100,9 +111,9 @@ def main():
     pred_clf = clf.predict(X_test)
 
     acc = accuracy_score(y_test_clf, pred_clf)
-    prec = precision_score(y_test_clf, pred_clf)
-    rec = recall_score(y_test_clf, pred_clf)
-    f1 = f1_score(y_test_clf, pred_clf)
+    prec = precision_score(y_test_clf, pred_clf, zero_division=0)
+    rec = recall_score(y_test_clf, pred_clf, zero_division=0)
+    f1 = f1_score(y_test_clf, pred_clf, zero_division=0)
 
     print("\n=== Classification ===")
     print("Accuracy :", acc)
@@ -110,14 +121,17 @@ def main():
     print("Recall   :", rec)
     print("F1       :", f1)
 
-    joblib.dump(clf, MODEL_DIR / "classifier.pkl")
+    joblib.dump(clf, MODEL_DIR / "classifier.pkl", compress=3)
 
     # -------------------------------------------------
     # Save metrics
     # -------------------------------------------------
 
     metrics = {
-        "regression": {"mae": float(mae), "r2": float(r2)},
+        "regression": {
+            "mae": float(mae),
+            "r2": float(r2)
+        },
         "classification": {
             "accuracy": float(acc),
             "precision": float(prec),
@@ -132,7 +146,7 @@ def main():
     print("\nSaved models + metrics.")
 
 
-# -------------------------------------------------
+# =================================================
 
 if __name__ == "__main__":
     main()

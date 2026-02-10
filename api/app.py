@@ -1,30 +1,62 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Body
+from pydantic import BaseModel
 import joblib
 import pandas as pd
 from datetime import datetime
-from fastapi import Body
+from pathlib import Path
+
 
 app = FastAPI(title="DPF Soot Load Prediction API")
 
 
-# -------------------------------------------------
+# =================================================
 # Load models at startup
-# -------------------------------------------------
+# =================================================
 
-reg_model = joblib.load("models/regressor.pkl")
-clf_model = joblib.load("models/classifier.pkl")
-feature_cols = joblib.load("models/feature_cols.pkl")
+MODEL_DIR = Path("models")
+
+try:
+    reg_model = joblib.load(MODEL_DIR / "regressor.pkl")
+    clf_model = joblib.load(MODEL_DIR / "classifier.pkl")
+    feature_cols = joblib.load(MODEL_DIR / "feature_cols.pkl")
+except Exception as e:
+    raise RuntimeError(
+        "Models not found. Train models first using models/train.py"
+    ) from e
 
 
-# -------------------------------------------------
-# Feature preparation (⭐ shared logic)
-# -------------------------------------------------
+# =================================================
+# Request Schema (⭐ professional upgrade)
+# =================================================
+
+class TelemetryInput(BaseModel):
+    engine_load: float
+    rpm: float
+    speed: float
+    exhaust_temp_pre: float
+    exhaust_temp_post: float
+    flow_rate: float
+    ambient_temp: float
+    diff_pressure: float
+    temp_roll_mean_10: float
+    temp_roll_mean_60: float
+    temp_delta: float
+    minutes_since_regen: float
+    idle_ratio_30: float
+    high_load_ratio_30: float
+
+
+# =================================================
+# Feature preparation
+# =================================================
 
 def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Applies same feature engineering used during training.
-    This guarantees training == inference consistency.
+    Guarantees training == inference consistency.
     """
+
+    df = df.copy()
 
     # safety clipping
     df["speed"] = df["speed"].clip(0, 120)
@@ -41,18 +73,21 @@ def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# -------------------------------------------------
+# =================================================
 # Health
-# -------------------------------------------------
+# =================================================
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "models_loaded": reg_model is not None and clf_model is not None
+    }
 
 
-# -------------------------------------------------
+# =================================================
 # Model info
-# -------------------------------------------------
+# =================================================
 
 @app.get("/model/info")
 def model_info():
@@ -63,31 +98,14 @@ def model_info():
     }
 
 
-# -------------------------------------------------
+# =================================================
 # Single prediction
-# -------------------------------------------------
+# =================================================
 
 @app.post("/predict/soot-load")
-def predict_single(data: dict):
+def predict_single(data: TelemetryInput):
 
-    required_cols = [
-        "engine_load", "rpm", "speed",
-        "exhaust_temp_pre", "exhaust_temp_post",
-        "flow_rate", "ambient_temp", "diff_pressure",
-        "temp_roll_mean_10", "temp_roll_mean_60",
-        "temp_delta", "minutes_since_regen",
-        "idle_ratio_30", "high_load_ratio_30"
-    ]
-
-    # ✅ VALIDATE FIRST (before dataframe creation)
-    missing = [c for c in required_cols if c not in data]
-
-    if missing:
-        return {"error": f"Missing fields: {missing}"}, 400
-
-    df = pd.DataFrame([data])
-
-    # feature prep AFTER validation
+    df = pd.DataFrame([data.dict()])
     df = prepare_features(df)
 
     soot_pred = float(reg_model.predict(df)[0])
@@ -99,15 +117,17 @@ def predict_single(data: dict):
     }
 
 
-
-# -------------------------------------------------
-# Batch prediction (FIXED ⭐)
-# -------------------------------------------------
+# =================================================
+# Batch prediction
+# =================================================
 
 @app.post("/predict/batch")
-def predict_batch(data: list = Body(...)):
+def predict_batch(data: list[TelemetryInput] = Body(...)):
 
-    df = pd.DataFrame(data)
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty batch payload")
+
+    df = pd.DataFrame([d.dict() for d in data])
     df = prepare_features(df)
 
     soot = reg_model.predict(df)
@@ -122,4 +142,3 @@ def predict_batch(data: list = Body(...)):
     ]
 
     return {"predictions": results}
-

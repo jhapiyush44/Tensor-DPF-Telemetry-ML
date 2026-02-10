@@ -4,9 +4,8 @@ API tests
 Key idea:
 ---------
 We do NOT commit real .pkl models to git.
-So tests create tiny dummy models automatically if missing.
+So tests create tiny dummy models automatically.
 
-This keeps:
 ✔ CI fast
 ✔ repo clean
 ✔ no large binaries
@@ -14,6 +13,7 @@ This keeps:
 """
 
 import os
+import shutil
 import joblib
 import numpy as np
 import pandas as pd
@@ -22,10 +22,13 @@ from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 
 
 # =================================================
-# Create dummy models ONLY for testing
+# Always create fresh dummy models (CI safe)
 # =================================================
 
 def create_dummy_models():
+
+    if os.path.exists("models"):
+        shutil.rmtree("models")
 
     os.makedirs("models", exist_ok=True)
 
@@ -54,13 +57,12 @@ def create_dummy_models():
     joblib.dump(feature_cols, "models/feature_cols.pkl")
 
 
-# Create models only if missing (CI case)
-if not os.path.exists("models/regressor.pkl"):
-    create_dummy_models()
+# ALWAYS create dummy models before app import
+create_dummy_models()
 
 
 # =================================================
-# NOW import app (models exist)
+# Import app AFTER models exist
 # =================================================
 
 from fastapi.testclient import TestClient
@@ -112,7 +114,6 @@ def test_single_prediction():
 
     assert r.status_code == 200
     assert "soot_load_percent" in data
-    assert "regen_recommended" in data
     assert isinstance(data["regen_recommended"], bool)
 
 
@@ -126,7 +127,7 @@ def test_batch_prediction():
     data = r.json()
 
     assert r.status_code == 200
-    assert "predictions" in data
+    assert isinstance(data["predictions"], list)
     assert len(data["predictions"]) == 2
 
 
@@ -134,4 +135,5 @@ def test_missing_fields():
 
     r = client.post("/predict/soot-load", json={})
 
-    assert r.status_code != 200
+    # FastAPI validation error
+    assert r.status_code == 422

@@ -13,10 +13,10 @@ def test_clean_data():
     cleaned = clean_data(df)
 
     # speed clipped
-    assert cleaned["speed"].min() >= 0
+    assert cleaned["speed"].tolist() == [0, 50]
 
     # rpm clipped
-    assert cleaned["rpm"].max() <= 4000
+    assert cleaned["rpm"].tolist() == [500, 4000]
 
-    # engine_load clipped
-    assert cleaned["engine_load"].between(0, 1).all()
+    # engine load clipped
+    assert cleaned["engine_load"].tolist() == [1, 0]

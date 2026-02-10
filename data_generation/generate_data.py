@@ -1,27 +1,29 @@
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
-np.random.seed(42)
 
-# -------------------------------------------------
-# CONFIG
-# -------------------------------------------------
+# =================================================
+# Config
+# =================================================
+
 OUTPUT_DIR = Path("data")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-N_VEHICLES = 30          # safe for laptop
+N_VEHICLES = 30
 DAYS = 90
-FREQ = "1min"            # 1 minute sampling
-TRIP_DURATION = 60       # minutes per trip
+FREQ = "1min"
+TRIP_DURATION = 60  # minutes
+
+rng = np.random.default_rng(42)  # modern reproducible RNG
 
 
-# -------------------------------------------------
+# =================================================
 # Helper: simulate one vehicle
-# -------------------------------------------------
+# =================================================
 
-def simulate_vehicle(vehicle_id, timestamps):
+def simulate_vehicle(vehicle_id: int, timestamps: pd.DatetimeIndex):
 
     n = len(timestamps)
 
@@ -29,47 +31,42 @@ def simulate_vehicle(vehicle_id, timestamps):
     # Base correlated signals
     # -------------------------
 
-    speed = np.clip(np.random.normal(45, 20, n), 0, 110)
+    speed = np.clip(rng.normal(45, 20, n), 0, 110)
+    rpm = speed * 35 + rng.normal(0, 200, n)
+    engine_load = np.clip(speed / 110 + rng.normal(0, 0.1, n), 0, 1)
 
-    rpm = speed * 35 + np.random.normal(0, 200, n)
+    ambient_temp = rng.normal(30, 5, n)
 
-    engine_load = np.clip(speed / 110 + np.random.normal(0, 0.1, n), 0, 1)
+    exhaust_temp_pre = 200 + 300 * engine_load + rng.normal(0, 15, n)
+    exhaust_temp_post = exhaust_temp_pre - rng.normal(15, 5, n)
 
-    ambient_temp = np.random.normal(30, 5, n)
+    flow_rate = speed * 0.8 + rng.normal(0, 2, n)
 
-    exhaust_temp_pre = 200 + 300 * engine_load + np.random.normal(0, 15, n)
-    exhaust_temp_post = exhaust_temp_pre - np.random.normal(15, 5, n)
-
-    flow_rate = speed * 0.8 + np.random.normal(0, 2, n)
-
-    # -------------------------------------------------
-    # Soot physics simulation (simple but realistic)
-    # -------------------------------------------------
+    # -------------------------
+    # Soot simulation
+    # -------------------------
 
     soot = np.zeros(n)
     maintenance_events = []
 
     for i in range(1, n):
 
-        # accumulation
         delta = 0.02 * engine_load[i]
 
-        # passive regen at high temperature
-        if exhaust_temp_pre[i] > 500:
+        if exhaust_temp_pre[i] > 500:  # passive regen
             delta -= 0.015
 
-        soot[i] = max(0, soot[i-1] + delta)
+        soot[i] = max(0, soot[i - 1] + delta)
 
-        # active regen
-        if soot[i] > 1.0:
+        if soot[i] > 1.0:  # active regen
             soot[i] *= 0.1
             maintenance_events.append(timestamps[i])
 
-    diff_pressure = soot * 50 + np.random.normal(0, 1, n)
+    diff_pressure = soot * 50 + rng.normal(0, 1, n)
 
-    # -------------------------------------------------
-    # TELEMETRY DATAFRAME
-    # -------------------------------------------------
+    # =================================================
+    # TELEMETRY
+    # =================================================
 
     telemetry = pd.DataFrame({
         "vehicle_id": vehicle_id,
@@ -85,14 +82,13 @@ def simulate_vehicle(vehicle_id, timestamps):
         "soot_load": soot
     })
 
-    # memory optimization (nice touch)
     float_cols = telemetry.select_dtypes("float64").columns
     telemetry[float_cols] = telemetry[float_cols].astype("float32")
     telemetry["vehicle_id"] = telemetry["vehicle_id"].astype("int16")
 
-    # -------------------------------------------------
-    # MAINTENANCE EVENTS
-    # -------------------------------------------------
+    # =================================================
+    # MAINTENANCE
+    # =================================================
 
     maintenance = pd.DataFrame({
         "vehicle_id": [vehicle_id] * len(maintenance_events),
@@ -100,19 +96,22 @@ def simulate_vehicle(vehicle_id, timestamps):
         "action_type": ["active_regen"] * len(maintenance_events)
     })
 
-    # -------------------------------------------------
-    # TRIP DATASET (assignment requirement ⭐)
-    # -------------------------------------------------
+    # =================================================
+    # TRIPS ⭐ (IMPORTANT FOR FEATURE PIPELINE)
+    # =================================================
 
     trips = []
 
     for i in range(0, n, TRIP_DURATION):
 
-        chunk = slice(i, min(i + TRIP_DURATION, n))
+        end_idx = min(i + TRIP_DURATION, n)
+        chunk = slice(i, end_idx)
 
         trip_speed = speed[chunk]
 
-        distance = trip_speed.mean() * 1  # approx km
+        duration_min = end_idx - i
+        distance_km = trip_speed.mean() * (duration_min / 60)
+
         stop_count = int((trip_speed < 5).sum())
 
         if stop_count > 20:
@@ -125,9 +124,8 @@ def simulate_vehicle(vehicle_id, timestamps):
         trips.append({
             "vehicle_id": vehicle_id,
             "trip_start": timestamps[i],
-            "trip_end": timestamps[min(i + TRIP_DURATION - 1, n-1)],
-            "trip_distance": distance,
-            "trip_duration": TRIP_DURATION,
+            "trip_end": timestamps[end_idx - 1],
+            "distance_km": distance_km,      # ⭐ standardized name
             "stop_count": stop_count,
             "driving_pattern": pattern
         })
@@ -137,13 +135,13 @@ def simulate_vehicle(vehicle_id, timestamps):
     return telemetry, maintenance, trips_df
 
 
-# -------------------------------------------------
+# =================================================
 # Main
-# -------------------------------------------------
+# =================================================
 
 def main():
 
-    print("Generating synthetic fleet data...")
+    print("Generating synthetic fleet data...\n")
 
     start = datetime(2025, 1, 1)
 
@@ -166,18 +164,18 @@ def main():
         maint_all.append(m_df)
         trip_all.append(trip_df)
 
-    telemetry = pd.concat(telemetry_all)
-    maintenance = pd.concat(maint_all)
-    trips = pd.concat(trip_all)
+    telemetry = pd.concat(telemetry_all, ignore_index=True)
+    maintenance = pd.concat(maint_all, ignore_index=True)
+    trips = pd.concat(trip_all, ignore_index=True)
 
     telemetry.to_csv(OUTPUT_DIR / "telemetry.csv", index=False)
     maintenance.to_csv(OUTPUT_DIR / "maintenance.csv", index=False)
     trips.to_csv(OUTPUT_DIR / "trips.csv", index=False)
 
     print("\nSaved:")
-    print(" - telemetry.csv")
-    print(" - maintenance.csv")
-    print(" - trips.csv")
+    print(f" telemetry.csv   → {len(telemetry):,} rows")
+    print(f" maintenance.csv → {len(maintenance):,} rows")
+    print(f" trips.csv       → {len(trips):,} rows")
 
 
 if __name__ == "__main__":
