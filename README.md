@@ -1,3 +1,15 @@
+---
+title: DPF Soot Load API
+emoji: 🚗
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+---
+
+
+
+
 # Vehicle Telemetry ML Pipeline
 
 A complete end-to-end Machine Learning system that generates synthetic vehicle telemetry data, performs advanced feature engineering, trains predictive models, and deploys them via a FastAPI inference service. This pipeline predicts soot load levels and regeneration requirements for vehicle exhaust systems.
