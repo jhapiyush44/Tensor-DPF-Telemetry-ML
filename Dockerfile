@@ -55,6 +55,9 @@ USER appuser
 # =================================================
 EXPOSE 8000
 
+RUN python data_generation/generate_data.py && \
+    python pipeline/feature_engineering.py && \
+    python models/train.py
 
 # =================================================
 # Start server
