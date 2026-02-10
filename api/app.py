@@ -5,6 +5,7 @@ import json
 import numpy as np
 from datetime import datetime
 from .monitoring import log_prediction
+from pathlib import Path
 
 app = FastAPI(title="DPF Soot Load Prediction API")
 
@@ -15,7 +16,20 @@ app = FastAPI(title="DPF Soot Load Prediction API")
 reg_model = joblib.load("models/regressor.pkl")
 clf_model = joblib.load("models/classifier.pkl")
 feature_cols = joblib.load("models/feature_cols.pkl")
-metrics = json.load(open("models/metrics.json"))
+
+metrics_path = Path("models/metrics.json")
+
+if metrics_path.exists():
+    metrics = json.load(open(metrics_path))
+else:
+    # CI / test fallback
+    metrics = {
+        "version": "test",
+        "trained_at": "N/A",
+        "regression": {},
+        "classification": {}
+    }
+
 
 
 # =================================================
