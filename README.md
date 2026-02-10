@@ -480,6 +480,95 @@ This section explains key architectural and technical choices made in the system
 
 ---
 
+## 🚀 Optional Cloud Deployment (Hugging Face Spaces)
+
+This project has also been deployed on Hugging Face Spaces as a Dockerized FastAPI service for demonstration purposes.
+
+### Live URLs
+
+**Health check:**
+```
+GET https://jhapiyush44-tensor-dpf-telementry-ml.hf.space/health
+```
+
+**Swagger UI:**
+```
+https://jhapiyush44-tensor-dpf-telementry-ml.hf.space/docs
+```
+
+### Current Status
+
+| Endpoint | Status | Notes |
+|----------|--------|-------|
+| `GET /health` | ✅ Works | API running |
+| `GET /model/info` | ✅ Works | Model metadata available |
+| `POST /predict/soot-load` | ⚠ May fail | Model training during build exceeds memory |
+| `POST /predict/batch` | ⚠ May fail | Same reason |
+
+### Why POST endpoints may fail
+
+During Docker build, the container:
+- Generates synthetic data (~3.9M rows)
+- Performs feature engineering (rolling windows, groupby ops)
+- Trains RandomForest models
+
+This requires >4GB RAM.
+
+The free Hugging Face Spaces environment has limited memory, so the training step may be killed by the system:
+- Exit code 137 (OOMKilled)
+
+As a result, models are not created and prediction endpoints return:
+```
+503 Models not loaded
+```
+
+**This does NOT affect local usage:**
+- Locally: Full dataset, full training, all endpoints work correctly
+- The issue is only related to limited cloud build resources
+
+### 🔧 How to enable POST endpoints on Hugging Face (if needed)
+
+If deployment with working predictions is required, apply these steps:
+
+**Step 1 — Reduce dataset size for container training**
+
+In `generate_data.py`, use environment variables:
+```python
+N_VEHICLES = 5
+DAYS = 14
+FREQ = "5min"
+```
+
+This reduces memory usage by ~100x.
+
+**Step 2 — Reduce training cost**
+
+In `models/train.py`:
+```python
+n_estimators = 20
+n_jobs = 1
+```
+
+Prevents parallel memory spikes.
+
+**Step 3 — Train models during Docker build**
+
+Add to `Dockerfile`:
+```dockerfile
+RUN python data_generation/generate_data.py && \
+    python pipeline/feature_engineering.py && \
+    python models/train.py
+```
+
+This generates models inside the container so POST endpoints work.
+
+**After these changes:**
+- Models load successfully
+- POST endpoints return predictions
+- Space runs fully end-to-end
+
+---
+
 ## Project Structure
 
 ```
