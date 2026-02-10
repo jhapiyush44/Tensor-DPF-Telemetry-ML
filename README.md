@@ -273,11 +273,39 @@ curl http://localhost:8000/health
 **Response:**
 ```json
 {
-  "status": "ok"
+  "status": "ok",
+  "reg_model_loaded": true,
+  "clf_model_loaded": true,
+  "timestamp": "2026-02-10 10:59:08.645757"
+}
+```
+### 2. Model Info
+
+Returns metadata about the currently loaded models, including evaluated performance.
+
+**Endpoint:** `GET /model/info`
+
+**Example Response:**
+```json
+{
+  "model_type": "RandomForest",
+  "regression": {
+    "mae": 0.034,
+    "r2": 0.87
+  },
+  "classification": {
+    "accuracy": 0.78,
+    "precision": 0.82,
+    "recall": 0.75,
+    "f1": 0.78
+  },
+  "feature_count": 17,
+  "timestamp": "2026-02-10T10:17:05.747Z"
 }
 ```
 
-### 2. Single Prediction - Soot Load
+### 3. Single Prediction — Soot Load
+
 Predict soot load percentage for a single vehicle measurement.
 
 **Endpoint:** `POST /predict/soot-load`
@@ -307,11 +335,12 @@ Predict soot load percentage for a single vehicle measurement.
 ```json
 {
   "soot_load_percent": 22.17,
+  "confidence_interval": 3.45,
   "regen_recommended": false
 }
 ```
 
-### 3. Batch Predictions
+### 4. Batch Predictions
 Predict soot load and regeneration needs for multiple measurements in one request.
 
 **Endpoint:** `POST /predict/batch`
@@ -362,15 +391,42 @@ Predict soot load and regeneration needs for multiple measurements in one reques
   "predictions": [
     {
       "soot_load_percent": 22.17,
+      "confidence_interval": 3.50,
       "regen_recommended": false
     },
     {
       "soot_load_percent": 54.74,
-      "regen_recommended": false
+      "confidence_interval": 4.10,
+      "regen_recommended": true
     }
   ]
 }
 ```
+
+---
+
+
+## Testing & CI (Continuous Integration)
+
+To ensure API correctness without committing model artifacts to GitHub, the test suite dynamically generates lightweight dummy models.
+
+The CI workflow will:
+- create dummy RandomForest models if none are present
+- validate API responses
+- run unit and integration tests
+
+This ensures:
+✔ CI builds quickly  
+✔ tests simulate production behavior  
+✔ no large binaries (.pkl) are stored in source control
+
+Add this to `.gitignore`:
+```
+models/.pkl
+models/metrics.json
+data/
+```
+
 
 ### Interactive API Documentation
 FastAPI automatically generates interactive Swagger documentation:
@@ -494,17 +550,19 @@ Tensor Internship/
 
 ## Summary
 
-This end-to-end ML pipeline demonstrates a complete workflow for building, training, and deploying vehicle telemetry models:
+This end-to-end ML pipeline demonstrates a complete workflow for building, training, validating, and deploying vehicle telemetry models:
 
-✓ **Data:** Generates 3.9M rows of realistic synthetic telemetry across 30 vehicles over 90 days
+✓ **Data:** Generates ~3.9M rows of realistic synthetic telemetry  
+✓ **Features:** Engineers advanced time-series features  
+✓ **Models:** Trains two RandomForest models (regression + classification)  
+✓ **Uncertainty:** Provides confidence interval estimates on predictions  
+✓ **Deployment:** Serves predictions via FastAPI endpoints  
+▸ Supports `/health`, `/model/info`, `/predict/soot-load`, `/predict/batch`  
+✓ **Robustness:** CI-safe model loading  
+✓ **Testing:** Unit and API tests with dummy models  
+✓ **Docker:** Fully containerized for reproducible deployment
 
-✓ **Features:** Engineers 40+ advanced features including rolling statistics, lag features, and temporal aggregations
 
-✓ **Models:** Trains two RandomForest models—regression for soot load prediction and classification for regeneration detection
-
-✓ **Deployment:** Serves predictions via FastAPI with health checks, single, and batch inference endpoints
-
-✓ **Optimization:** Configurable parameters for different computational resources and use cases
 
 **Next Steps:**
 1. Follow the **Setup Instructions** to configure your environment
