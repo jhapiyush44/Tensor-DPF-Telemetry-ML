@@ -70,7 +70,24 @@ def model_info():
 @app.post("/predict/soot-load")
 def predict_single(data: dict):
 
+    required_cols = [
+        "engine_load", "rpm", "speed",
+        "exhaust_temp_pre", "exhaust_temp_post",
+        "flow_rate", "ambient_temp", "diff_pressure",
+        "temp_roll_mean_10", "temp_roll_mean_60",
+        "temp_delta", "minutes_since_regen",
+        "idle_ratio_30", "high_load_ratio_30"
+    ]
+
+    # ✅ VALIDATE FIRST (before dataframe creation)
+    missing = [c for c in required_cols if c not in data]
+
+    if missing:
+        return {"error": f"Missing fields: {missing}"}, 400
+
     df = pd.DataFrame([data])
+
+    # feature prep AFTER validation
     df = prepare_features(df)
 
     soot_pred = float(reg_model.predict(df)[0])
@@ -80,6 +97,7 @@ def predict_single(data: dict):
         "soot_load_percent": round(soot_pred * 100, 2),
         "regen_recommended": bool(regen_pred)
     }
+
 
 
 # -------------------------------------------------
