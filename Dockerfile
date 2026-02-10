@@ -13,7 +13,7 @@ WORKDIR /app
 
 
 # =================================================
-# System deps (only for building wheels)
+# System deps (temporary for building wheels)
 # =================================================
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
@@ -38,31 +38,22 @@ RUN apt-get purge -y gcc build-essential && \
 
 
 # =================================================
-# Copy project code
+# Copy project
 # =================================================
 COPY . .
 
 
 # =================================================
-# ⭐ TRAIN MODELS DURING BUILD (RUN AS ROOT)
-# =================================================
-RUN python data_generation/generate_data.py && \
-    python pipeline/feature_engineering.py && \
-    python models/train.py
-
-
-# =================================================
-# Non-root user (runtime security ⭐)
+# Non-root user (production best practice ⭐)
 # =================================================
 RUN useradd -m appuser
 USER appuser
 
 
 # =================================================
-# Expose FastAPI port (HF uses 7860)
+# Expose port
 # =================================================
 EXPOSE 7860
-
 
 # =================================================
 # Start server
