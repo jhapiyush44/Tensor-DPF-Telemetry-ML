@@ -137,3 +137,16 @@ def test_missing_fields():
 
     # FastAPI validation error
     assert r.status_code == 422
+
+def test_out_of_range_clipping():
+    payload = sample_payload()
+    payload["speed"] = 9999
+
+    r = client.post("/predict/soot-load", json=payload)
+    assert r.status_code == 200
+
+
+def test_model_info():
+    r = client.get("/model/info")
+    assert r.status_code == 200
+    assert "regression" in r.json()
