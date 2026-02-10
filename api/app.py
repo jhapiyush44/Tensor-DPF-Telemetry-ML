@@ -1,5 +1,5 @@
 # =====================================================
-# DPF Soot Load Prediction API (Production Ready)
+# DPF Soot Load Prediction API (Production Ready + CI Safe)
 # =====================================================
 
 from fastapi import FastAPI, Body, HTTPException
@@ -21,7 +21,8 @@ MODEL_DIR = Path("models")
 
 
 # =====================================================
-# Safe model loading (CI friendly ⭐)
+# Safe loading (VERY IMPORTANT for CI)
+# Prevents crashes if .pkl not committed
 # =====================================================
 
 def safe_load(path, default=None):
@@ -34,8 +35,8 @@ def safe_load(path, default=None):
 reg_model = safe_load(MODEL_DIR / "regressor.pkl")
 clf_model = safe_load(MODEL_DIR / "classifier.pkl")
 feature_cols = safe_load(MODEL_DIR / "feature_cols.pkl", [])
-metrics = {}
 
+# metrics.json may not exist in CI
 try:
     with open(MODEL_DIR / "metrics.json") as f:
         metrics = json.load(f)
@@ -44,14 +45,11 @@ except Exception:
 
 
 # =====================================================
-# Feature preparation (shared logic)
+# Shared feature preparation
+# Ensures training == inference
 # =====================================================
 
 def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Applies same transformations used during training.
-    Guarantees schema consistency.
-    """
 
     # safety clipping
     df["speed"] = df["speed"].clip(0, 120)
@@ -69,13 +67,10 @@ def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =====================================================
-# Helper: regression with confidence interval ⭐
+# RandomForest uncertainty (confidence interval)
 # =====================================================
 
 def predict_with_uncertainty(df: pd.DataFrame):
-    """
-    RandomForest uncertainty estimation using tree variance.
-    """
 
     tree_preds = np.array([t.predict(df)[0] for t in reg_model.estimators_])
 
@@ -102,21 +97,22 @@ def health():
 
 
 # =====================================================
-# Model info
+# Model info (⭐ CI TEST EXPECTS regression key at top level)
 # =====================================================
 
 @app.get("/model/info")
 def model_info():
+
     return {
         "model_type": "RandomForest",
-        "metrics": metrics,
+        **metrics,                 # ⭐ flatten so 'regression' exists
         "feature_count": len(feature_cols),
         "timestamp": str(datetime.utcnow())
     }
 
 
 # =====================================================
-# Required fields
+# Validation
 # =====================================================
 
 REQUIRED_COLS = [
@@ -130,10 +126,13 @@ REQUIRED_COLS = [
 
 
 def validate_payload(data: dict):
+
     missing = [c for c in REQUIRED_COLS if c not in data]
+
     if missing:
+        # ⭐ test expects 422
         raise HTTPException(
-            status_code=400,
+            status_code=422,
             detail=f"Missing fields: {missing}"
         )
 
