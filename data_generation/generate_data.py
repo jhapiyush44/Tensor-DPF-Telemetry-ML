@@ -42,6 +42,18 @@ def simulate_vehicle(vehicle_id: int, timestamps: pd.DatetimeIndex):
 
     flow_rate = speed * 0.8 + rng.normal(0, 2, n)
 
+    # =========================
+    # Sensor noise + failures
+    # =========================
+
+    # Random missing values (1% dropout)
+    mask = rng.random(n) < 0.01
+    exhaust_temp_pre[mask] = np.nan
+
+    # Sensor drift (gradual increase)
+    drift = np.cumsum(rng.normal(0, 0.01, n))
+    exhaust_temp_pre += drift
+
     # -------------------------
     # Soot simulation
     # -------------------------
@@ -49,18 +61,73 @@ def simulate_vehicle(vehicle_id: int, timestamps: pd.DatetimeIndex):
     soot = np.zeros(n)
     maintenance_events = []
 
+    regen_active = False
+    regen_timer = 0
+
     for i in range(1, n):
 
-        delta = 0.02 * engine_load[i]
+        # =========================
+        # Safe temperature handling (ADD THIS)
+        # =========================
+        temp = exhaust_temp_pre[i]
 
-        if exhaust_temp_pre[i] > 500:  # passive regen
-            delta -= 0.015
+        if np.isnan(temp):
+            temp = 300  # fallback normal temp
 
+        # =========================
+        # Base accumulation
+        # =========================
+        load_factor = engine_load[i]
+        rpm_factor = min(rpm[i] / 3000, 1.2)
+        flow_factor = min(flow_rate[i] / 100, 1.2)
+
+        delta = (
+            0.012 * load_factor +
+            0.005 * rpm_factor +
+            0.003 * flow_factor
+        )
+
+        # =========================
+        # Driving pattern impact
+        # =========================
+        if speed[i] < 20:          # city / idle heavy
+            delta += 0.01
+        elif speed[i] > 80:        # highway
+            delta -= 0.005
+
+        # =========================
+        # Passive regeneration
+        # =========================
+        if temp > 500:
+            delta -= 0.02
+        elif temp > 400:
+            delta -= 0.01
+
+        # =========================
+        # Update soot (stateful)
+        # =========================
         soot[i] = max(0, soot[i - 1] + delta)
 
-        if soot[i] > 1.0:  # active regen
-            soot[i] *= 0.1
-            maintenance_events.append(timestamps[i])
+        # =========================
+        # Trigger regeneration
+        # =========================
+        if soot[i] > 1.0 and temp > 450 and not regen_active:
+                regen_active = True
+                regen_timer = 10  # lasts 10 minutes
+                maintenance_events.append(timestamps[i])
+
+        # =========================
+        # During regeneration
+        # =========================
+        if regen_active:
+            if temp > 400:
+                soot[i] *= 0.85
+                regen_timer -= 1
+            else:
+                regen_active = False  # stop regen if temp drops
+
+            if regen_timer <= 0:
+                regen_active = False
 
     diff_pressure = soot * 50 + rng.normal(0, 1, n)
 
