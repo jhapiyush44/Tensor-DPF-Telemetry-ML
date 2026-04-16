@@ -4,134 +4,109 @@ An end-to-end production-style machine learning system that predicts **Diesel Pa
 
 ---
 
+## 🔗 Live Demo (Hugging Face)
+
+👉 **Try the API here:**
+https://huggingface.co/spaces/jhapiyush44/Tensor-DPF-Telementry-ML
+
+👉 Test endpoints:
+
+* `http://jhapiyush44-tensor-dpf-telementry-ml.hf.space/health` **GET**
+* `http://jhapiyush44-tensor-dpf-telementry-ml.hf.space/predict/soot-load` **POST**
+
+---
+
 ## 🔥 Key Highlights
 
-* 📊 ~3.9M rows of synthetic fleet telemetry data
-* 🤖 Dual-model system:
-
-  * Regression → soot load prediction
-  * Classification → regeneration recommendation
-* ⚡ FastAPI-based inference API (real-time + batch)
-* 🧠 Feature engineering with time-series signals
-* 🔁 CI/CD pipeline using GitHub Actions
-* 📦 Dockerized deployment on Hugging Face Spaces
+* 📊 ~3.9M rows of synthetic telemetry data
+* 🤖 Dual-model system (Regression + Classification)
+* ⚡ FastAPI inference API (real-time)
+* 🔁 CI/CD pipeline (GitHub Actions)
+* 📦 Dockerized deployment
 
 ---
 
 ## 🎯 Problem Statement
 
-Diesel vehicles accumulate soot in their DPF systems.
-If not regenerated at the right time, it can lead to:
+Diesel vehicles accumulate soot in their DPF systems. Poor regeneration timing leads to:
 
 * Reduced engine efficiency
 * Increased emissions
 * Potential system failure
 
-This project predicts:
+This system predicts:
 
 * **Soot load (%)**
-* **Whether regeneration is needed**
+* **Whether regeneration is required**
 
 ---
 
 ## ⚙️ System Overview
 
 ```text
-Data Generation → Feature Engineering → Model Training → API → Deployment
+Data → Features → Model → API → Deployment
 ```
-
-* Synthetic telemetry simulates real-world vehicle behavior
-* Time-series features capture driving patterns
-* Models are trained and deployed for real-time inference
 
 ---
 
 ## 🧠 Approach
 
-### 1. Data Simulation
+### Data Simulation
 
-* Multi-sensor telemetry (RPM, speed, temperature, load)
+* Multi-sensor telemetry (RPM, speed, temp, load)
 * Realistic soot accumulation + regeneration cycles
 * Noise, drift, and edge cases included
 
 ---
 
-### 2. Feature Engineering
+### Feature Engineering
 
-* Rolling temperature averages
+* Rolling temperature features
 * Load ratios (idle / high load)
-* Time since last regeneration
-* Trip-based features
+* Trip behavior metrics
 
 ---
 
-### 3. Modeling
+### Modeling
 
-Two models are trained:
+* RandomForest vs XGBoost
+* Time-based train/validation/test split
+* Removed leakage features:
 
-* **Regression (Soot Load)**
-
-  * RandomForest vs XGBoost
-* **Classification (Regen Needed)**
-
-  * RandomForest vs XGBoost
-
-### ⚠️ Important:
-
-* Removed **data leakage features** (`diff_pressure`, `minutes_since_regen`)
-* Ensured models learn real patterns, not shortcuts
+  * `diff_pressure`
+  * `minutes_since_regen`
 
 ---
 
 ## 📊 Results
 
-| Model        | MAE (Regression) | F1 Score (Classification) |
-| ------------ | ---------------- | ------------------------- |
-| RandomForest | ~0.52            | ~0.67                     |
-| XGBoost      | ~0.52            | ~0.67                     |
+| Model        | MAE   | F1 Score |
+| ------------ | ----- | -------- |
+| RandomForest | ~0.52 | ~0.67    |
+| XGBoost      | ~0.52 | ~0.67    |
 
-### ✅ Final Model:
-
-* Regressor → XGBoost / RandomForest (based on validation)
-* Classifier → XGBoost / RandomForest
+👉 Final models selected based on validation performance
 
 ---
 
-## 🔍 Feature Importance Insights
+## 🔍 Feature Insights
 
-### Regressor:
-
-* Temperature trends
-* Engine load behavior
-* Driving patterns
-
-### Classifier:
-
-* High load ratio
-* Exhaust temperature
-* Engine activity
+* Regressor → temperature + load behavior
+* Classifier → high load + exhaust temperature
 
 👉 Matches real-world DPF behavior
 
 ---
 
-## 🚀 API Endpoints
+## 🚀 API Example
 
-### 🔹 Health Check
-
-```
-GET /health
-```
-
----
-
-### 🔹 Predict Soot Load
+### Endpoint:
 
 ```
 POST /predict/soot-load
 ```
 
-#### Example Input:
+### Input:
 
 ```json
 {
@@ -150,7 +125,7 @@ POST /predict/soot-load
 }
 ```
 
-#### Example Output:
+### Output:
 
 ```json
 {
@@ -162,72 +137,108 @@ POST /predict/soot-load
 
 ---
 
-## 🧪 CI/CD Pipeline
+## 🧪 CI/CD
 
-* GitHub Actions workflow
-* Runs on push & pull request
+* GitHub Actions
+* Runs on push & PR
 * Includes:
 
   * Linting (flake8)
-  * Automated testing (pytest)
+  * Testing (pytest)
 
 ---
 
-## 📦 Deployment
+## ⚠️ Deployment Note (Important)
 
-* Dockerized application
-* Deployed on Hugging Face Spaces
-* Pre-trained models used for fast startup
+Due to **Hugging Face free tier limitations**:
 
----
+* Large binary files (`.pkl`) cannot be pushed via Git
+* Models were **uploaded manually via HF UI**
 
-## ⚠️ Key Engineering Decisions
+👉 This ensures:
 
-* Used **time-based split** to avoid data leakage
-* Removed **leaky features** after detecting unrealistic performance
-* Added **output constraints (0–100%)** for safe predictions
-* Handled **NumPy → JSON serialization issues** in API
-* Implemented fallback for **model-specific behavior (RF vs XGB)**
+* fast startup
+* avoids memory and storage issues
+
+👉 Locally, the full pipeline (data → training → inference) works end-to-end.
 
 ---
 
-## 💡 What Makes This Project Strong
+## ▶️ Run Locally
 
-* Realistic system simulation (not random data)
-* Proper ML validation (no leakage)
-* Model comparison and selection
-* Production-ready API
-* CI/CD + deployment
-* Debugging real-world issues (memory, serialization, model loading)
+### 1. Clone repo
+
+```bash
+git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
+cd YOUR_REPO
+```
 
 ---
 
-## ▶️ How to Run Locally
+### 2. Create environment
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+---
+
+### 3. Install dependencies
 
 ```bash
 pip install -r requirements.txt
+```
 
+---
+
+### 4. Run full pipeline
+
+```bash
 python data_generation/generate_data.py
 python pipeline/feature_engineering.py
 python models/train.py
+```
 
+---
+
+### 5. Start API
+
+```bash
 uvicorn api.app:app --reload
 ```
 
 ---
 
-## 📌 Future Improvements
+### 6. Open docs
 
-* SHAP-based explainability
-* Real-time streaming pipeline (Kafka)
+```
+http://127.0.0.1:8000/docs
+```
+
+---
+
+## 💡 Key Engineering Decisions
+
+* Removed feature leakage after debugging unrealistic performance
+* Used time-series split to avoid data leakage
+* Added output constraints (0–100%)
+* Handled NumPy serialization issues in API
+* Added fallback for model-specific behavior (RF vs XGB)
+
+---
+
+## 🚀 Future Work
+
+* SHAP explainability
+* Real-time streaming (Kafka)
+* Monitoring & drift detection
 * Cloud deployment (AWS/GCP)
-* Monitoring + drift detection
 
 ---
 
 ## 👨‍💻 Author
 
 Piyush Jha
-Aspiring Data Scientist | IIT Madras BS Data Science
 
 ---
