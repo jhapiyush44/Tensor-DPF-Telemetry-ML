@@ -169,8 +169,8 @@ Due to **Hugging Face free tier limitations**:
 ### 1. Clone repo
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
-cd YOUR_REPO
+git clone https://github.com/jhapiyush44/Tensor-DPF-Telemetry-ML.git
+cd Tensor-DPF-Telemetry-ML
 ```
 
 ---
