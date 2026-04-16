@@ -16,6 +16,16 @@ from sklearn.metrics import (
 
 from xgboost import XGBRegressor, XGBClassifier
 
+def convert_to_python_types(obj):
+    if isinstance(obj, dict):
+        return {k: convert_to_python_types(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_to_python_types(v) for v in obj]
+    elif hasattr(obj, "item"):  # numpy types
+        return obj.item()
+    else:
+        return obj
+
 
 DATA_PATH = Path("data/features.parquet")
 MODEL_DIR = Path("models")
@@ -72,7 +82,7 @@ def main():
     val   = df[(df["timestamp"] >= q80) & (df["timestamp"] < q90)]
     test  = df[df["timestamp"] >= q90]
 
-    drop_cols = ["timestamp", "vehicle_id", "soot_load", "regen_needed"]
+    drop_cols = ["timestamp", "vehicle_id", "soot_load", "regen_needed", "diff_pressure", "minutes_since_regen"]
 
     X_train = train.drop(columns=drop_cols)
     X_val   = val.drop(columns=drop_cols)
@@ -181,8 +191,8 @@ def main():
     # Save full feature importance
     with open(MODEL_DIR / "feature_importance.json", "w") as f:
         json.dump({
-            "regressor": reg_feature_importance,
-            "classifier": clf_feature_importance
+            "regressor": {k: float(v) for k, v in reg_feature_importance.items()},
+            "classifier": {k: float(v) for k, v in clf_feature_importance.items()}
         }, f, indent=2)
 
     # =================================================
@@ -239,8 +249,10 @@ def main():
     }
 
     with open(MODEL_DIR / "metrics.json", "w") as f:
-        json.dump(metrics, f, indent=2)
+        metrics_clean = convert_to_python_types(metrics)
 
+        json.dump(metrics_clean, f, indent=2)
+        
     print("\nSaved best models + metrics.json + feature_importance.json")
 
 

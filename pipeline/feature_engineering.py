@@ -163,7 +163,7 @@ def add_trip_features(df: pd.DataFrame, trips: pd.DataFrame) -> pd.DataFrame:
 def add_targets(df: pd.DataFrame) -> pd.DataFrame:
     """Classification label."""
     df = df.copy()
-    df["regen_needed"] = (df["soot_load"] > 0.8).astype(int)
+    df["regen_needed"] = ((df["soot_load"] > 0.9) & (df["minutes_since_regen"] > 30)).astype(int)
     return df
 
 
