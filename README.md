@@ -1,316 +1,138 @@
----
-title: DPF Soot Load API
-emoji: 🚗
-colorFrom: blue
-colorTo: green
-sdk: docker
-app_port: 7860
----
+# 🚗 Vehicle Telemetry ML Pipeline
 
-
-
-
-# Vehicle Telemetry ML Pipeline
-
-A complete end-to-end Machine Learning system that generates synthetic vehicle telemetry data, performs advanced feature engineering, trains predictive models, and deploys them via a FastAPI inference service. This pipeline predicts soot load levels and regeneration requirements for vehicle exhaust systems.
+An end-to-end production-style machine learning system that predicts **Diesel Particulate Filter (DPF) soot levels** and **regeneration needs** using simulated vehicle telemetry data.
 
 ---
 
-## Architecture Overview
+## 🔥 Key Highlights
 
-The system follows a clean, modular architecture with four main stages:
+* 📊 ~3.9M rows of synthetic fleet telemetry data
+* 🤖 Dual-model system:
 
-```
-Data Generation → Feature Engineering → Model Training → API Deployment
-     ↓                    ↓                    ↓                ↓
-generate_data.py  feature_engineering.py    train.py      uvicorn (FastAPI)
-     ↓                    ↓                    ↓                ↓
-CSV files         Parquet features       Trained models    HTTP endpoints
-```
-
-**Data Flow:**
-1. **Data Generation** (`generate_data.py`): Creates synthetic telemetry, maintenance, and trip data
-2. **Feature Engineering** (`feature_engineering.py`): Transforms raw data into ML-ready features
-3. **Model Training** (`train.py`): Trains RandomForest models for regression and classification
-4. **API Deployment** (`api/app.py`): Serves real-time predictions with FastAPI
+  * Regression → soot load prediction
+  * Classification → regeneration recommendation
+* ⚡ FastAPI-based inference API (real-time + batch)
+* 🧠 Feature engineering with time-series signals
+* 🔁 CI/CD pipeline using GitHub Actions
+* 📦 Dockerized deployment on Hugging Face Spaces
 
 ---
 
-## Data Generation Explanation
+## 🎯 Problem Statement
 
-The data generation module creates realistic vehicle telemetry data simulating multiple vehicles over an extended period.
+Diesel vehicles accumulate soot in their DPF systems.
+If not regenerated at the right time, it can lead to:
 
-**Configuration Parameters:**
-- **N_VEHICLES**: 30 vehicles in the fleet
-- **DAYS**: 90 days of historical data
-- **FREQ**: 1-minute measurement frequency (measurements taken every minute)
+* Reduced engine efficiency
+* Increased emissions
+* Potential system failure
 
-**Total Rows Calculation:**
-```
-Rows per vehicle = DAYS × Hours per day × Minutes per hour
-Rows per vehicle = 90 × 24 × 60 = 129,600 rows
-Total dataset = 129,600 rows × 30 vehicles = 3,888,000 rows (~3.9M)
-```
+This project predicts:
 
-**Generated Files:**
-
-| File | Purpose | Rows | Columns |
-|------|---------|------|---------|
-| `telemetry.csv` | Raw sensor measurements (pressure, temperature, emissions) | ~3.9M | 8 |
-| `maintenance.csv` | Maintenance events and schedules | Variable | 5 |
-| `trips.csv` | Trip-level aggregations with distance and duration | ~2,700 | 6 |
-
-These files form the foundation for feature engineering and model training.
+* **Soot load (%)**
+* **Whether regeneration is needed**
 
 ---
 
-## Memory/RAM Optimization
+## ⚙️ System Overview
 
-The default configuration (30 vehicles, 90 days, 1-minute frequency) requires moderate computational resources. Use this guide to adjust data generation parameters based on your available RAM.
-
-**Recommended Configurations by Available RAM:**
-
-| RAM | Vehicles | Days | Frequency | Total Rows | Notes |
-|-----|----------|------|-----------|-----------|-------|
-| **16GB** | 30 | 90 | 1 min | 3.9M | Full dataset, recommended |
-| **16GB** | 50 | 90 | 1 min | 6.5M | Large-scale testing |
-| **8GB** | 15 | 90 | 1 min | 1.95M | Comfortable processing |
-| **8GB** | 10 | 60 | 1 min | 864K | Conservative approach |
-| **4GB** | 5 | 30 | 5 min | 216K | Minimal dataset |
-| **4GB** | 10 | 7 | 10 min | 100.8K | Very limited resources |
-
-**How to Adjust:**
-Edit the configuration in `data_generation/generate_data.py`:
-
-```python
-N_VEHICLES = 30  # Reduce to 15 or 10
-DAYS = 90        # Reduce to 30 or 60
-FREQ = "1min"    # Change to "5min" or "10min"
+```text
+Data Generation → Feature Engineering → Model Training → API → Deployment
 ```
 
-**General Guidelines:**
-- Reducing `DAYS` has the largest impact on dataset size
-- Increasing `FREQ` (e.g., from 1 min to 5 min) reduces rows by 5x
-- Start conservative and increase if you have headroom
+* Synthetic telemetry simulates real-world vehicle behavior
+* Time-series features capture driving patterns
+* Models are trained and deployed for real-time inference
 
 ---
 
-## Clean Restart Instructions
+## 🧠 Approach
 
-If you need to reset the pipeline and regenerate all data, follow these steps to clean your workspace completely.
+### 1. Data Simulation
 
-**Why Clean Restart is Necessary:**
-- Old data files may contain obsolete schemas or configurations
-- Cached model artifacts can cause loading errors with updated feature sets
-- Parquet format can cache schema information, causing conflicts
-- Starting fresh ensures reproducibility and prevents subtle bugs
-
-**Clean Restart Steps:**
-
-```powershell
-# Windows PowerShell
-
-# Delete generated data files
-Remove-Item -Path "data\*.csv" -Force
-Remove-Item -Path "data\*.parquet" -Force
-
-# Delete trained models
-Remove-Item -Path "models\*.pkl" -Force
-Remove-Item -Path "models\*.joblib" -Force
-Remove-Item -Path "models\metrics.json" -Force
-
-# Verify cleanup
-Get-ChildItem -Path data\
-Get-ChildItem -Path models\
-```
-
-**Linux/Mac Equivalent:**
-
-```bash
-# Delete generated data files
-rm -f data/*.csv data/*.parquet
-
-# Delete trained models
-rm -f models/*.pkl models/*.joblib models/metrics.json
-
-# Verify cleanup
-ls -la data/
-ls -la models/
-```
-
-After cleanup, proceed with fresh data generation (see **Step-by-Step Pipeline Commands** below).
+* Multi-sensor telemetry (RPM, speed, temperature, load)
+* Realistic soot accumulation + regeneration cycles
+* Noise, drift, and edge cases included
 
 ---
 
-## Setup Instructions
+### 2. Feature Engineering
 
-Before running the pipeline, set up your Python environment with all required dependencies.
-
-**Step 1: Create Virtual Environment**
-
-**Windows:**
-```powershell
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-```
-
-**Linux/Mac:**
-```bash
-python -m venv venv
-source venv/bin/activate
-```
-
-**Step 2: Activate Virtual Environment**
-
-Verify your virtual environment is active (you should see `(venv)` in your terminal prompt).
-
-**Step 3: Install Dependencies**
-
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
+* Rolling temperature averages
+* Load ratios (idle / high load)
+* Time since last regeneration
+* Trip-based features
 
 ---
 
-## Step-by-Step Pipeline Commands
+### 3. Modeling
 
-Execute these commands in sequence to complete the ML pipeline. Each step builds on the previous one.
+Two models are trained:
 
-### Step 1: Generate Synthetic Data
-**Purpose:** Create raw vehicle telemetry, maintenance, and trip data  
-**Input:** None  
-**Output:** `data/telemetry.csv`, `data/maintenance.csv`, `data/trips.csv`  
-**Approximate Time:** 30-60 seconds
+* **Regression (Soot Load)**
 
-```bash
-python data_generation/generate_data.py
-```
+  * RandomForest vs XGBoost
+* **Classification (Regen Needed)**
 
-Expected output:
-```
-Generated 3,888,000 telemetry records
-Generated 450 maintenance records
-Generated 2,700 trip records
-✓ Data generation complete
-```
+  * RandomForest vs XGBoost
 
-### Step 2: Feature Engineering
-**Purpose:** Transform raw data into ML-ready features with temporal aggregations  
-**Input:** `data/telemetry.csv`, `data/maintenance.csv`, `data/trips.csv`  
-**Output:** `data/features.parquet`  
-**Approximate Time:** 2-5 minutes
+### ⚠️ Important:
 
-```bash
-python pipeline/feature_engineering.py
-```
-
-Expected output:
-```
-Loading data files...
-Engineering features...
-Computing rolling statistics...
-Computing lag features...
-✓ Features saved to data/features.parquet
-Features shape: (3,888,000, 42)
-```
-
-### Step 3: Train Models
-**Purpose:** Train RandomForest models for soot load prediction and regen classification  
-**Input:** `data/features.parquet`  
-**Output:** `models/regressor.pkl`, `models/classifier.pkl`, `models/metrics.json`, `models/feature_cols.pkl`
-**Approximate Time:** 5-15 minutes
-
-```bash
-python models/train.py
-```
-
-Expected output:
-```
-Loading features...
-Splitting data (80/20 train/test)...
-Training soot load regressor...
-Training regen classifier...
-Evaluation metrics saved
-✓ Model training complete
-```
-
-### Step 4: Launch API Server
-**Purpose:** Start FastAPI server for real-time inference  
-**Input:** `models/regressor.pkl`, `models/classifier.pkl`  
-**Output:** HTTP server on `http://localhost:8000`  
-**Approximate Time:** Immediate startup
-
-```bash
-uvicorn api.app:app --reload
-```
-
-Expected output:
-```
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     Application startup complete
-```
-
-Visit the interactive API docs at: **http://localhost:8000/docs**
+* Removed **data leakage features** (`diff_pressure`, `minutes_since_regen`)
+* Ensured models learn real patterns, not shortcuts
 
 ---
 
-## API Usage
+## 📊 Results
 
-Once the API server is running, you can make HTTP requests to the following endpoints.
+| Model        | MAE (Regression) | F1 Score (Classification) |
+| ------------ | ---------------- | ------------------------- |
+| RandomForest | ~0.52            | ~0.67                     |
+| XGBoost      | ~0.52            | ~0.67                     |
 
-### 1. Health Check
-Verify that the API and models are ready for inference.
+### ✅ Final Model:
 
-**Endpoint:** `GET /health`
+* Regressor → XGBoost / RandomForest (based on validation)
+* Classifier → XGBoost / RandomForest
 
-**Example Request:**
-```bash
-curl http://localhost:8000/health
+---
+
+## 🔍 Feature Importance Insights
+
+### Regressor:
+
+* Temperature trends
+* Engine load behavior
+* Driving patterns
+
+### Classifier:
+
+* High load ratio
+* Exhaust temperature
+* Engine activity
+
+👉 Matches real-world DPF behavior
+
+---
+
+## 🚀 API Endpoints
+
+### 🔹 Health Check
+
+```
+GET /health
 ```
 
-**Response:**
-```json
-{
-  "status": "ok",
-  "reg_model_loaded": true,
-  "clf_model_loaded": true,
-  "timestamp": "2026-02-10 10:59:08.645757"
-}
+---
+
+### 🔹 Predict Soot Load
+
 ```
-### 2. Model Info
-
-Returns metadata about the currently loaded models, including evaluated performance.
-
-**Endpoint:** `GET /model/info`
-
-**Example Response:**
-```json
-{
-  "model_type": "RandomForest",
-  "regression": {
-    "mae": 0.034,
-    "r2": 0.87
-  },
-  "classification": {
-    "accuracy": 0.78,
-    "precision": 0.82,
-    "recall": 0.75,
-    "f1": 0.78
-  },
-  "feature_count": 17,
-  "timestamp": "2026-02-10T10:17:05.747Z"
-}
+POST /predict/soot-load
 ```
 
-### 3. Single Prediction — Soot Load
+#### Example Input:
 
-Predict soot load percentage for a single vehicle measurement.
-
-**Endpoint:** `POST /predict/soot-load`
-
-**Request Body:**
 ```json
 {
   "engine_load": 0.6,
@@ -320,348 +142,92 @@ Predict soot load percentage for a single vehicle measurement.
   "exhaust_temp_post": 470,
   "flow_rate": 50,
   "ambient_temp": 30,
-  "diff_pressure": 10,
   "temp_roll_mean_10": 480,
   "temp_roll_mean_60": 470,
   "temp_delta": 30,
-  "minutes_since_regen": 120,
   "idle_ratio_30": 0.1,
   "high_load_ratio_30": 0.5
 }
-
 ```
 
-**Response:**
+#### Example Output:
+
 ```json
 {
-  "soot_load_percent": 22.17,
-  "confidence_interval": 3.45,
+  "soot_load_percent": 100.0,
+  "confidence_interval": 0.0,
   "regen_recommended": false
 }
 ```
 
-### 4. Batch Predictions
-Predict soot load and regeneration needs for multiple measurements in one request.
+---
 
-**Endpoint:** `POST /predict/batch`
+## 🧪 CI/CD Pipeline
 
-**Request Body:**
-```json
-{
-  "measurements": [
-  {
-    "engine_load": 0.60,
-    "rpm": 2000,
-    "speed": 55,
-    "exhaust_temp_pre": 510,
-    "exhaust_temp_post": 480,
-    "flow_rate": 45,
-    "ambient_temp": 30,
-    "diff_pressure": 10,
-    "temp_roll_mean_10": 500,
-    "temp_roll_mean_60": 490,
-    "temp_delta": 30,
-    "minutes_since_regen": 100,
-    "idle_ratio_30": 0.1,
-    "high_load_ratio_30": 0.5
-  },
-  {
-    "engine_load": 0.85,
-    "rpm": 2800,
-    "speed": 85,
-    "exhaust_temp_pre": 620,
-    "exhaust_temp_post": 580,
-    "flow_rate": 65,
-    "ambient_temp": 33,
-    "diff_pressure": 25,
-    "temp_roll_mean_10": 610,
-    "temp_roll_mean_60": 600,
-    "temp_delta": 40,
-    "minutes_since_regen": 300,
-    "idle_ratio_30": 0.01,
-    "high_load_ratio_30": 0.85
-  }
-]
-}
-```
+* GitHub Actions workflow
+* Runs on push & pull request
+* Includes:
 
-**Response:**
-```json
-{
-  "predictions": [
-    {
-      "soot_load_percent": 22.17,
-      "confidence_interval": 3.50,
-      "regen_recommended": false
-    },
-    {
-      "soot_load_percent": 54.74,
-      "confidence_interval": 4.10,
-      "regen_recommended": true
-    }
-  ]
-}
+  * Linting (flake8)
+  * Automated testing (pytest)
+
+---
+
+## 📦 Deployment
+
+* Dockerized application
+* Deployed on Hugging Face Spaces
+* Pre-trained models used for fast startup
+
+---
+
+## ⚠️ Key Engineering Decisions
+
+* Used **time-based split** to avoid data leakage
+* Removed **leaky features** after detecting unrealistic performance
+* Added **output constraints (0–100%)** for safe predictions
+* Handled **NumPy → JSON serialization issues** in API
+* Implemented fallback for **model-specific behavior (RF vs XGB)**
+
+---
+
+## 💡 What Makes This Project Strong
+
+* Realistic system simulation (not random data)
+* Proper ML validation (no leakage)
+* Model comparison and selection
+* Production-ready API
+* CI/CD + deployment
+* Debugging real-world issues (memory, serialization, model loading)
+
+---
+
+## ▶️ How to Run Locally
+
+```bash
+pip install -r requirements.txt
+
+python data_generation/generate_data.py
+python pipeline/feature_engineering.py
+python models/train.py
+
+uvicorn api.app:app --reload
 ```
 
 ---
 
+## 📌 Future Improvements
 
-## Testing & CI (Continuous Integration)
-
-To ensure API correctness without committing model artifacts to GitHub, the test suite dynamically generates lightweight dummy models.
-
-The CI workflow will:
-- create dummy RandomForest models if none are present
-- validate API responses
-- run unit and integration tests
-
-This ensures:
-✔ CI builds quickly  
-✔ tests simulate production behavior  
-✔ no large binaries (.pkl) are stored in source control
-
-Add this to `.gitignore`:
-```
-models/.pkl
-models/metrics.json
-data/
-```
-
-
-### Interactive API Documentation
-FastAPI automatically generates interactive Swagger documentation:
-- **Swagger UI:** http://localhost:8000/docs
-- **ReDoc:** http://localhost:8000/redoc
-
-Use these interfaces to test endpoints directly from your browser with auto-complete and request validation.
+* SHAP-based explainability
+* Real-time streaming pipeline (Kafka)
+* Cloud deployment (AWS/GCP)
+* Monitoring + drift detection
 
 ---
 
-## Design Decisions
+## 👨‍💻 Author
 
-This section explains key architectural and technical choices made in the system design.
-
-### Why Apache Parquet for Features?
-
-**Decision:** Store engineered features in Parquet format instead of CSV
-
-**Rationale:**
-- **Compression:** Parquet reduces file size by 70-80% compared to CSV (4GB → 0.8GB)
-- **Performance:** 10-50x faster read times for analytical queries
-- **Type Safety:** Preserves data types (float32, int64) without re-parsing
-- **Columnar Storage:** Enables efficient feature subset loading
-- **Streaming:** Supports lazy evaluation for large datasets
-
-**Trade-off:** Requires `pyarrow` dependency; not human-readable. Mitigated by using CSV for raw data (easier inspection).
-
-### Why Time-Based Train/Test Split?
-
-**Decision:** Split data by timestamp (80% earlier data, 20% recent data) instead of random split
-
-**Rationale:**
-- **Realistic Evaluation:** Simulates real-world scenario where you train on historical data and predict future
-- **Prevents Data Leakage:** Temporal dependencies within vehicle trips stay together
-- **Trend Detection:** Tests model's ability to handle temporal patterns
-- **Maintenance Cycles:** Captures degradation patterns that emerge over time
-
-**Alternative Considered:** Random stratified split (not suitable for time-series data)
-
-### Why Compute Features Inside API?
-
-**Decision:** API accepts raw inputs and computes features on-the-fly instead of requiring pre-computed features
-
-**Rationale:**
-- **Consistency:** Same feature computation logic used during training and inference
-- **Simplicity:** Clients send raw sensor values; API handles transformation
-- **Flexibility:** Easy to update feature logic without client changes
-- **Portability:** Models remain self-contained with their feature requirements
-
-**Trade-off:** Slight latency increase (typically <50ms for single prediction); mitigated by batch endpoint for bulk requests.
+Piyush Jha
+Aspiring Data Scientist | IIT Madras BS Data Science
 
 ---
-
-## 🚀 Optional Cloud Deployment (Hugging Face Spaces)
-
-This project has also been deployed on Hugging Face Spaces as a Dockerized FastAPI service for demonstration purposes.
-
-### Live URLs
-
-**Health check:**
-```
-GET https://jhapiyush44-tensor-dpf-telementry-ml.hf.space/health
-```
-
-**Swagger UI:**
-```
-https://jhapiyush44-tensor-dpf-telementry-ml.hf.space/docs
-```
-
-### Current Status
-
-| Endpoint | Status | Notes |
-|----------|--------|-------|
-| `GET /health` | ✅ Works | API running |
-| `GET /model/info` | ✅ Works | Model metadata available |
-| `POST /predict/soot-load` | ⚠ May fail | Model training during build exceeds memory |
-| `POST /predict/batch` | ⚠ May fail | Same reason |
-
-### Why POST endpoints may fail
-
-During Docker build, the container:
-- Generates synthetic data (~3.9M rows)
-- Performs feature engineering (rolling windows, groupby ops)
-- Trains RandomForest models
-
-This requires >4GB RAM.
-
-The free Hugging Face Spaces environment has limited memory, so the training step may be killed by the system:
-- Exit code 137 (OOMKilled)
-
-As a result, models are not created and prediction endpoints return:
-```
-503 Models not loaded
-```
-
-**This does NOT affect local usage:**
-- Locally: Full dataset, full training, all endpoints work correctly
-- The issue is only related to limited cloud build resources
-
-### 🔧 How to enable POST endpoints on Hugging Face (if needed)
-
-If deployment with working predictions is required, apply these steps:
-
-**Step 1 — Reduce dataset size for container training**
-
-In `generate_data.py`, use environment variables:
-```python
-N_VEHICLES = 5
-DAYS = 14
-FREQ = "5min"
-```
-
-This reduces memory usage by ~100x.
-
-**Step 2 — Reduce training cost**
-
-In `models/train.py`:
-```python
-n_estimators = 20
-n_jobs = 1
-```
-
-Prevents parallel memory spikes.
-
-**Step 3 — Train models during Docker build**
-
-Add to `Dockerfile`:
-```dockerfile
-RUN python data_generation/generate_data.py && \
-    python pipeline/feature_engineering.py && \
-    python models/train.py
-```
-
-This generates models inside the container so POST endpoints work.
-
-**After these changes:**
-- Models load successfully
-- POST endpoints return predictions
-- Space runs fully end-to-end
-
----
-
-## Project Structure
-
-```
-Tensor Internship/
-├── README.md                          # This file
-├── requirements.txt                   # Python dependencies
-├── .gitignore                         # Git ignore rules
-│
-├── data/                              # Data directory
-│   ├── telemetry.csv                  # Raw sensor data (~3.9M rows)
-│   ├── maintenance.csv                # Maintenance events
-│   ├── trips.csv                      # Trip aggregations
-│   └── features.parquet               # Engineered features (generated)
-│
-├── data_generation/
-│   └── generate_data.py               # Synthetic data generator
-│                                      # Creates telemetry, maintenance, trips
-│
-├── pipeline/
-│   └── feature_engineering.py         # Feature transformation & aggregation
-│                                      # Converts CSV → Parquet with ML features
-│
-├── models/
-│   ├── train.py                       # Model training script
-│   │                                  # Trains RandomForest regresssor/classifier
-│   ├── soot_load_model.pkl            # Trained soot load predictor (generated)
-│   ├── regen_classifier.pkl           # Trained regen classifier (generated)
-│   └── metrics.json                   # Model performance metrics (generated)
-│
-├── tests/
-│   └── test_features.py               # Feature engineering unit tests
-│
-└── api/
-    ├── app.py                         # FastAPI application
-    │                                  # Endpoints: /health, /predict/soot-load, /predict/batch
-    └── __pycache__/                   # Python cache (auto-generated)
-```
-
-**Directory Descriptions:**
-- **data/**: Input/output for data generation and feature engineering
-- **data_generation/**: Scripts for synthetic data creation
-- **pipeline/**: Feature engineering and data transformation logic
-- **models/**: Training scripts and serialized model artifacts
-- **api/**: FastAPI application for inference deployment
-- **tests/**: Unit tests and validation scripts
-
----
-
-## Tech Stack
-
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **Language** | Python 3.8+ | Core implementation |
-| **Data Processing** | pandas | Data manipulation & aggregation |
-| **ML Framework** | scikit-learn | RandomForest models & metrics |
-| **API Framework** | FastAPI | HTTP endpoints & inference |
-| **Model Serialization** | joblib | Save/load trained models |
-| **Data Format** | Apache Parquet | Efficient feature storage |
-| **Data Format** | CSV | Raw data interchange |
-
-**Key Versions:**
-- pandas ≥ 1.3.0 (for performance and API)
-- scikit-learn ≥ 1.0.0 (RandomForest stability)
-- FastAPI ≥ 0.95.0 (async support)
-- pyarrow ≥ 8.0.0 (Parquet support)
-
----
-
-## Summary
-
-This end-to-end ML pipeline demonstrates a complete workflow for building, training, validating, and deploying vehicle telemetry models:
-
-✓ **Data:** Generates ~3.9M rows of realistic synthetic telemetry  
-✓ **Features:** Engineers advanced time-series features  
-✓ **Models:** Trains two RandomForest models (regression + classification)  
-✓ **Uncertainty:** Provides confidence interval estimates on predictions  
-✓ **Deployment:** Serves predictions via FastAPI endpoints  
-▸ Supports `/health`, `/model/info`, `/predict/soot-load`, `/predict/batch`  
-✓ **Robustness:** CI-safe model loading  
-✓ **Testing:** Unit and API tests with dummy models  
-✓ **Docker:** Fully containerized for reproducible deployment
-
-
-
-**Next Steps:**
-1. Follow the **Setup Instructions** to configure your environment
-2. Execute the **Step-by-Step Pipeline Commands** in order
-3. Test endpoints using the **API Usage** section
-4. Customize parameters in config files based on your hardware
-
-For questions or issues, refer to the relevant script documentation or test files.
-
----
-
-**Last Updated:** February 2026  
-**Status:** Production-ready

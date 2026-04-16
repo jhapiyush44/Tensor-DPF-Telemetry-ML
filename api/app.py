@@ -166,8 +166,10 @@ def predict_single(data: dict = Body(...)):
     soot_mean, soot_ci = predict_with_uncertainty(df)
     regen_pred = int(clf_model.predict(df)[0])
 
+    soot_value = max(0.0, min(1.0, float(soot_mean)))
+
     return {
-        "soot_load_percent": round(float(soot_mean) * 100, 2),
+        "soot_load_percent": round(soot_value * 100, 2),
         "confidence_interval": round(float(soot_ci) * 100, 2) if soot_ci is not None else 0.0,
         "regen_recommended": bool(regen_pred)
     }
