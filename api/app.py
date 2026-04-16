@@ -78,16 +78,20 @@ def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
 # RandomForest uncertainty
 # =====================================================
 
-def predict_with_uncertainty(df: pd.DataFrame):
+def predict_with_uncertainty(df):
+    
+    # RandomForest case
+    if hasattr(reg_model, "estimators_"):
+        tree_preds = np.array([t.predict(df)[0] for t in reg_model.estimators_])
+        mean = tree_preds.mean()
+        std = tree_preds.std()
+        ci = 1.96 * std
+        return mean, ci
 
-    tree_preds = np.array([t.predict(df)[0] for t in reg_model.estimators_])
-
-    mean = tree_preds.mean()
-    std = tree_preds.std()
-
-    ci = 1.96 * std  # 95% CI
-
-    return float(mean), float(ci)
+    # XGBoost (fallback)
+    else:
+        pred = reg_model.predict(df)[0]
+        return pred, 0.0
 
 
 # =====================================================
