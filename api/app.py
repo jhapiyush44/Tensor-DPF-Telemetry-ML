@@ -167,8 +167,8 @@ def predict_single(data: dict = Body(...)):
     regen_pred = int(clf_model.predict(df)[0])
 
     return {
-        "soot_load_percent": round(soot_mean * 100, 2),
-        "confidence_interval": round(soot_ci * 100, 2),
+        "soot_load_percent": round(float(soot_mean) * 100, 2),
+        "confidence_interval": round(float(soot_ci) * 100, 2) if soot_ci is not None else 0.0,
         "regen_recommended": bool(regen_pred)
     }
 
