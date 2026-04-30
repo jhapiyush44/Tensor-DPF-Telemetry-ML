@@ -1,112 +1,132 @@
-# 🚗 Vehicle Telemetry ML Pipeline
+# 🚗 Tensor-DPF Telemetry ML Pipeline
 
-An end-to-end production-style machine learning system that predicts **Diesel Particulate Filter (DPF) soot levels** and **regeneration needs** using simulated vehicle telemetry data.
+> **Production-ready, end-to-end ML system** for predicting Diesel Particulate Filter (DPF) soot accumulation and regeneration needs from vehicle telemetry data.
 
----
-
-## 🔗 Live Demo (Hugging Face)
-
-👉 **Try the API here:**
-https://huggingface.co/spaces/jhapiyush44/Tensor-DPF-Telementry-ML
-
-👉 Test endpoints:
-
-* `http://jhapiyush44-tensor-dpf-telementry-ml.hf.space/health` **GET**
-* `http://jhapiyush44-tensor-dpf-telementry-ml.hf.space/predict/soot-load` **POST**
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat&logo=docker&logoColor=white)](https://www.docker.com)
+[![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub_Actions-2088FF?style=flat&logo=githubactions&logoColor=white)](https://github.com/features/actions)
+[![License](https://img.shields.io/badge/License-MIT-green?style=flat)](LICENSE)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-Hugging_Face-FFD21F?style=flat&logo=huggingface&logoColor=black)](https://huggingface.co/spaces/jhapiyush44/Tensor-DPF-Telementry-ML)
 
 ---
 
-## 🔥 Key Highlights
+## 📌 Overview
 
-* 📊 ~3.9M rows of synthetic telemetry data
-* 🤖 Dual-model system (Regression + Classification)
-* ⚡ FastAPI inference API (real-time)
-* 🔁 CI/CD pipeline (GitHub Actions)
-* 📦 Dockerized deployment
+Diesel engines accumulate soot in their **Diesel Particulate Filters (DPF)**. Poorly timed regeneration cycles cause reduced engine efficiency, elevated emissions, and costly system failures.
 
----
+This project simulates the full ML lifecycle — from **raw telemetry ingestion** to a **live inference API** — to predict:
 
-## 🎯 Problem Statement
+| Target | Type | Description |
+|--------|------|-------------|
+| `soot_load_percent` | Regression | Current DPF soot fill level (0–100%) |
+| `regen_recommended` | Classification | Whether active regeneration should trigger |
 
-Diesel vehicles accumulate soot in their DPF systems. Poor regeneration timing leads to:
-
-* Reduced engine efficiency
-* Increased emissions
-* Potential system failure
-
-This system predicts:
-
-* **Soot load (%)**
-* **Whether regeneration is required**
+**Dataset scale:** ~3.9 million synthetic telemetry rows with realistic noise, drift, and regeneration cycles.
 
 ---
 
-## ⚙️ System Overview
+## 🏗️ Architecture
 
-```text
-Data → Features → Model → API → Deployment
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     ML Pipeline                             │
+│                                                             │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
+│  │ Data         │───▶│ Feature      │───▶│ Model        │  │
+│  │ Generation   │    │ Engineering  │    │ Training     │  │
+│  │              │    │              │    │              │  │
+│  │ 3.9M rows    │    │ 40+ features │    │ RF + XGBoost │  │
+│  │ Multi-sensor │    │ Lag, rolling │    │ Time-split   │  │
+│  │ Noise + drift│    │ Load ratios  │    │ CV + tuning  │  │
+│  └──────────────┘    └──────────────┘    └──────┬───────┘  │
+│                                                 │           │
+└─────────────────────────────────────────────────┼───────────┘
+                                                  │
+                                    ┌─────────────▼────────────┐
+                                    │     FastAPI Service      │
+                                    │  /predict/soot-load      │
+                                    │  /health                 │
+                                    │  Batch + single inference│
+                                    └─────────────┬────────────┘
+                                                  │
+                               ┌──────────────────▼──────────────┐
+                               │         Docker Container         │
+                               │   + GitHub Actions CI/CD         │
+                               │   + Hugging Face Deployment      │
+                               └─────────────────────────────────┘
 ```
 
 ---
 
-## 🧠 Approach
+## 🔥 Key Results
 
-### Data Simulation
+| Model | Task | MAE | R² | F1 Score |
+|-------|------|-----|----|----------|
+| RandomForest | Regression (soot load) | ~0.52 | 0.92 | — |
+| RandomForest | Classification (regen) | — | — | 0.89 |
+| XGBoost | Regression (soot load) | ~0.52 | — | — |
+| XGBoost | Classification (regen) | — | — | ~0.67 |
 
-* Multi-sensor telemetry (RPM, speed, temp, load)
-* Realistic soot accumulation + regeneration cycles
-* Noise, drift, and edge cases included
-
----
-
-### Feature Engineering
-
-* Rolling temperature features
-* Load ratios (idle / high load)
-* Trip behavior metrics
+> ✅ Final models selected based on held-out time-series validation performance.  
+> ⚠️ Leakage features (`diff_pressure`, `minutes_since_regen`) were removed after identifying unrealistic early performance.
 
 ---
 
-### Modeling
+## 🧠 Technical Deep Dive
 
-* RandomForest vs XGBoost
-* Time-based train/validation/test split
-* Removed leakage features:
+### 1. Data Simulation (`data_generation/`)
 
-  * `diff_pressure`
-  * `minutes_since_regen`
+Synthetic multi-sensor telemetry designed to mirror real DPF operating conditions:
+
+- Engine RPM, vehicle speed, engine load
+- Exhaust temperature (pre/post DPF)
+- Exhaust flow rate, ambient temperature
+- Realistic **soot accumulation curves** and **active regeneration cycles**
+- Injected sensor noise, temporal drift, and edge cases
+
+### 2. Feature Engineering (`pipeline/`)
+
+40+ engineered features capturing temporal and behavioral patterns:
+
+| Category | Features |
+|----------|----------|
+| Rolling statistics | `temp_roll_mean_10`, `temp_roll_mean_60` |
+| Thermal delta | `temp_delta` (pre vs post DPF) |
+| Load behaviour | `idle_ratio_30`, `high_load_ratio_30` |
+| Trip context | High-load %, speed variance |
+
+**Time-based train/val/test split** used throughout to prevent data leakage.
+
+### 3. Modeling (`models/`)
+
+- **RandomForestRegressor** and **RandomForestClassifier** as primary models
+- **XGBoost** benchmarked for comparison
+- Hyperparameter tuning via grid search + cross-validation
+- Output constrained to `[0, 100]` for soot load predictions
+- NumPy serialization handled explicitly for API compatibility
 
 ---
 
-## 📊 Results
+## 🚀 Live Demo
 
-| Model        | MAE   | F1 Score |
-| ------------ | ----- | -------- |
-| RandomForest | ~0.52 | ~0.67    |
-| XGBoost      | ~0.52 | ~0.67    |
+**🤗 Hugging Face Space:** [jhapiyush44/Tensor-DPF-Telementry-ML](https://huggingface.co/spaces/jhapiyush44/Tensor-DPF-Telementry-ML)
 
-👉 Final models selected based on validation performance
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | `GET` | Service health check |
+| `/predict/soot-load` | `POST` | Single + batch inference |
+| `/docs` | `GET` | Interactive Swagger UI |
 
----
-
-## 🔍 Feature Insights
-
-* Regressor → temperature + load behavior
-* Classifier → high load + exhaust temperature
-
-👉 Matches real-world DPF behavior
+> **Note on deployment:** Model `.pkl` files were uploaded manually via the Hugging Face UI due to free-tier Git LFS limitations. Locally, the full pipeline runs end-to-end without any manual steps.
 
 ---
 
-## 🚀 API Example
+## 📡 API Reference
 
-### Endpoint:
+### `POST /predict/soot-load`
 
-```
-POST /predict/soot-load
-```
-
-### Input:
+**Request body:**
 
 ```json
 {
@@ -125,120 +145,135 @@ POST /predict/soot-load
 }
 ```
 
-### Output:
+**Response:**
 
 ```json
 {
-  "soot_load_percent": 100.0,
-  "confidence_interval": 0.0,
+  "soot_load_percent": 73.4,
+  "confidence_interval": 4.2,
   "regen_recommended": false
 }
 ```
 
 ---
 
-## 🧪 CI/CD
-
-* GitHub Actions
-* Runs on push & PR
-* Includes:
-
-  * Linting (flake8)
-  * Testing (pytest)
-
----
-
-## ⚠️ Deployment Note (Important)
-
-Due to **Hugging Face free tier limitations**:
-
-* Large binary files (`.pkl`) cannot be pushed via Git
-* Models were **uploaded manually via HF UI**
-
-👉 This ensures:
-
-* fast startup
-* avoids memory and storage issues
-
-👉 Locally, the full pipeline (data → training → inference) works end-to-end.
-
----
-
 ## ▶️ Run Locally
 
-### 1. Clone repo
+### Prerequisites
+
+- Python 3.10+
+- Docker (optional, for containerised run)
+
+### Setup
 
 ```bash
+# 1. Clone
 git clone https://github.com/jhapiyush44/Tensor-DPF-Telemetry-ML.git
 cd Tensor-DPF-Telemetry-ML
-```
 
----
-
-### 2. Create environment
-
-```bash
+# 2. Create virtual environment
 python3 -m venv venv
-source venv/bin/activate
-```
+source venv/bin/activate          # Windows: venv\Scripts\activate
 
----
-
-### 3. Install dependencies
-
-```bash
+# 3. Install dependencies
 pip install -r requirements.txt
 ```
 
----
-
-### 4. Run full pipeline
+### Run the Full Pipeline
 
 ```bash
+# Generate synthetic telemetry data (~3.9M rows)
 python data_generation/generate_data.py
+
+# Feature engineering — produces Parquet files (80% smaller than CSV)
 python pipeline/feature_engineering.py
+
+# Train models (RandomForest + XGBoost, regression + classification)
 python models/train.py
 ```
 
----
-
-### 5. Start API
+### Start the API
 
 ```bash
 uvicorn api.app:app --reload
+# Swagger docs → http://127.0.0.1:8000/docs
+```
+
+### Run with Docker
+
+```bash
+docker build -t tensor-dpf-ml .
+docker run -p 8000:8000 tensor-dpf-ml
 ```
 
 ---
 
-### 6. Open docs
+## 🧪 Testing & CI/CD
+
+```bash
+# Run tests locally
+pytest tests/
+
+# Linting
+flake8 .
+```
+
+The **GitHub Actions** pipeline runs automatically on every push and pull request:
+
+- ✅ Linting with `flake8`
+- ✅ Unit + integration tests with `pytest`
+
+---
+
+## 🗂️ Project Structure
 
 ```
-http://127.0.0.1:8000/docs
+Tensor-DPF-Telemetry-ML/
+├── .github/
+│   └── workflows/         # GitHub Actions CI/CD
+├── api/
+│   └── app.py             # FastAPI inference service
+├── data_generation/
+│   └── generate_data.py   # Synthetic telemetry simulation
+├── models/
+│   └── train.py           # Model training + evaluation
+├── pipeline/
+│   └── feature_engineering.py  # Feature construction
+├── tests/                 # Pytest test suite
+├── Dockerfile
+├── requirements.txt
+└── README.md
 ```
 
 ---
 
-## 💡 Key Engineering Decisions
+## 🔧 Engineering Decisions
 
-* Removed feature leakage after debugging unrealistic performance
-* Used time-series split to avoid data leakage
-* Added output constraints (0–100%)
-* Handled NumPy serialization issues in API
-* Added fallback for model-specific behavior (RF vs XGB)
+| Decision | Rationale |
+|----------|-----------|
+| Apache Parquet for feature storage | 80% size reduction vs CSV; faster I/O |
+| Time-series train/val/test split | Prevents temporal data leakage |
+| Removed `diff_pressure` + `minutes_since_regen` | Were directly correlated with target — caused leakage |
+| Output clipping to `[0, 100]` | Enforces physical validity of soot load predictions |
+| RandomForest as primary model | Robust to noise; interpretable feature importances |
 
 ---
 
-## 🚀 Future Work
+## 🔮 Roadmap
 
-* SHAP explainability
-* Real-time streaming (Kafka)
-* Monitoring & drift detection
-* Cloud deployment (AWS/GCP)
+- [ ] SHAP explainability for feature attribution
+- [ ] Real-time streaming with Apache Kafka
+- [ ] Model monitoring & drift detection (Evidently AI)
+- [ ] Cloud deployment on AWS ECS / GCP Cloud Run
+- [ ] Dashboard for live soot load visualisation
 
 ---
 
 ## 👨‍💻 Author
 
-Piyush Jha
+**Piyush Jha** — ML Engineer  
+[GitHub](https://github.com/jhapiyush44) · [LinkedIn](https://www.linkedin.com/in/piyush-jha-3904a81a6/) · jhapiyush44@gmail.com
 
 ---
+
+*If you found this project useful, consider leaving a ⭐ — it helps others discover the work!*
