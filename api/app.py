@@ -88,8 +88,8 @@ async def startup_event():
 # ── Request / Response Schemas ────────────────────────────────────────────────
 class TelemetryInput(BaseModel):
     engine_load: float = Field(..., ge=0.0, le=1.0, description="Engine load (0.0–1.0)")
-    rpm: float = Field(..., ge=0, le=8000, description="Engine RPM")
-    speed: float = Field(..., ge=0, le=300, description="Vehicle speed km/h")
+    speed: float = Field(..., ge=0, description="Vehicle speed km/h — clipped to 300 internally")
+    rpm: float = Field(..., ge=0, description="Engine RPM — clipped to 8000 internally")
     exhaust_temp_pre: float = Field(..., ge=0, le=900, description="Pre-DPF exhaust temp °C")
     exhaust_temp_post: float = Field(..., ge=0, le=900, description="Post-DPF exhaust temp °C")
     flow_rate: float = Field(..., ge=0, le=500, description="Exhaust flow rate g/s")
@@ -209,7 +209,12 @@ def _run_ml_prediction(data: TelemetryInput) -> dict:
             "_note": "Mock prediction — run models/train.py to use real models"
         }
 
-    feature_vec = np.array([[getattr(data, f) for f in FEATURE_ORDER]])
+    # Clip out-of-range values before building feature vector
+    clipped = {f: getattr(data, f) for f in FEATURE_ORDER}
+    clipped["speed"] = min(clipped["speed"], 300.0)
+    clipped["rpm"] = min(clipped["rpm"], 8000.0)
+
+    feature_vec = np.array([[clipped[f] for f in FEATURE_ORDER]])
 
     soot_load = float(np.clip(_regressor.predict(feature_vec)[0], 0, 100))
 
