@@ -1,12 +1,12 @@
 """
 Vehicle Telemetry ML API — with LLM Explanation Layer
 Architecture:
-  POST /predict/explain
-    → ML Model (soot prediction)
-    → Feature Context Builder
-    → RAG (FAISS vector search)
-    → LLM (Gemini Flash explanation)
-    → JSON response
+    POST /predict/explain
+      → ML Model (soot prediction)
+      → Feature Context Builder
+      → RAG (FAISS vector search)
+      → LLM (Gemini Flash explanation)
+      → JSON response
 
 Also serves the frontend UI at GET /
 """
@@ -17,8 +17,9 @@ import numpy as np
 import joblib
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
@@ -43,9 +44,12 @@ MODEL_DIR = Path(__file__).parent.parent / "models"
 
 _regressor = None
 _classifier = None
+_feature_cols = []
+_metrics = {"regression": {}, "classification": {}}
+
 
 def load_models():
-    global _regressor, _classifier
+    global _regressor, _classifier, _feature_cols, _metrics
     reg_path = MODEL_DIR / "regressor.pkl"
     clf_path = MODEL_DIR / "classifier.pkl"
 
@@ -57,6 +61,21 @@ def load_models():
     _regressor = joblib.load(reg_path)
     _classifier = joblib.load(clf_path)
 
+    # Load feature_cols if available
+    fc_path = MODEL_DIR / "feature_cols.pkl"
+    if fc_path.exists():
+        _feature_cols = joblib.load(fc_path)
+
+    # Load metrics if available
+    metrics_path = MODEL_DIR / "metrics.json"
+    if metrics_path.exists():
+        try:
+            with open(metrics_path) as f:
+                _metrics = json.load(f)
+        except Exception:
+            pass
+
+
 @app.on_event("startup")
 async def startup_event():
     try:
@@ -64,6 +83,7 @@ async def startup_event():
     except FileNotFoundError as e:
         print(f"⚠️  Warning: {e}")
         print("   API will run but predictions will return mock data.")
+
 
 # ── Request / Response Schemas ────────────────────────────────────────────────
 class TelemetryInput(BaseModel):
@@ -77,16 +97,18 @@ class TelemetryInput(BaseModel):
     temp_roll_mean_10: float = Field(..., description="Rolling mean exhaust temp (10 min) °C")
     temp_roll_mean_60: float = Field(..., description="Rolling mean exhaust temp (60 min) °C")
     temp_delta: float = Field(..., description="Temp delta (instantaneous - rolling mean) °C")
-    # --- derived state flags ---
-    is_regen: int = Field(..., ge=0, le=1, description="Is active regeneration occurring? (0 or 1)")
-    idle: int = Field(..., ge=0, le=1, description="Is engine idling? (0 or 1)")
-    high_load: int = Field(..., ge=0, le=1, description="Is engine under high load? (0 or 1)")
-    # --- ratio features ---
     idle_ratio_30: float = Field(..., ge=0.0, le=1.0, description="Fraction of last 30 min at idle")
     high_load_ratio_30: float = Field(..., ge=0.0, le=1.0, description="Fraction of last 30 min at high load")
-    # --- trip features ---
-    trip_duration_min: float = Field(..., ge=0, description="Current trip duration in minutes")
-    trip_avg_speed: float = Field(..., ge=0, le=300, description="Average speed this trip km/h")
+
+    # --- derived state flags (optional with sensible defaults) ---
+    is_regen: int = Field(default=0, ge=0, le=1, description="Is active regeneration occurring? (0 or 1)")
+    idle: int = Field(default=0, ge=0, le=1, description="Is engine idling? (0 or 1)")
+    high_load: int = Field(default=0, ge=0, le=1, description="Is engine under high load? (0 or 1)")
+
+    # --- trip features (optional with sensible defaults) ---
+    trip_duration_min: float = Field(default=0.0, ge=0, description="Current trip duration in minutes")
+    trip_avg_speed: float = Field(default=0.0, ge=0, le=300, description="Average speed this trip km/h")
+
 
 # Must match model's feature_names_in_ exactly
 FEATURE_ORDER = [
@@ -104,6 +126,7 @@ async def serve_frontend():
         return FileResponse(index_path)
     return JSONResponse({"message": "DPF Telemetry API v2.0 — frontend not found"})
 
+
 @app.get("/health")
 async def health():
     return {
@@ -112,11 +135,37 @@ async def health():
         "version": "2.0.0"
     }
 
+
+@app.get("/model/info")
+def model_info():
+    """Model metadata endpoint — preserved for backward compatibility."""
+    return {
+        "model_type": "RandomForest",
+        **_metrics,  # flattens so regression/classification keys exist
+        "feature_count": len(_feature_cols),
+        "timestamp": str(datetime.utcnow())
+    }
+
+
 @app.post("/predict/soot-load")
 async def predict_soot_load(data: TelemetryInput):
     """Original prediction endpoint (ML only, no LLM)."""
     prediction = _run_ml_prediction(data)
     return prediction
+
+
+@app.post("/predict/batch")
+async def predict_batch(data: list = Body(...)):
+    """Batch prediction endpoint — preserved for backward compatibility."""
+    results = []
+    for item in data:
+        try:
+            parsed = TelemetryInput(**item)
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        results.append(_run_ml_prediction(parsed))
+    return {"predictions": results}
+
 
 @app.post("/predict/explain")
 async def predict_with_explanation(data: TelemetryInput):
@@ -145,6 +194,7 @@ async def predict_with_explanation(data: TelemetryInput):
         "explanation": llm_result["explanation"],
         "model_used": llm_result["model_used"],
     }
+
 
 # ── ML Prediction Helper ──────────────────────────────────────────────────────
 def _run_ml_prediction(data: TelemetryInput) -> dict:
@@ -183,6 +233,7 @@ def _run_ml_prediction(data: TelemetryInput) -> dict:
         "regen_recommended": regen_recommended,
         "regen_probability": round(regen_proba, 3),
     }
+
 
 # ── Mount static AFTER routes ─────────────────────────────────────────────────
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
