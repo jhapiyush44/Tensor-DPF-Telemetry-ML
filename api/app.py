@@ -1,205 +1,188 @@
-# =====================================================
-# DPF Soot Load Prediction API
-# Production-ready + CI-safe + test-safe
-# =====================================================
+"""
+Vehicle Telemetry ML API — with LLM Explanation Layer
+Architecture:
+  POST /predict/explain
+    → ML Model (soot prediction)
+    → Feature Context Builder
+    → RAG (FAISS vector search)
+    → LLM (Gemini Flash explanation)
+    → JSON response
 
-from fastapi import FastAPI, Body, HTTPException
-import pandas as pd
-import joblib
-import numpy as np
+Also serves the frontend UI at GET /
+"""
+
+import os
 import json
-from datetime import datetime
+import numpy as np
+import joblib
 from pathlib import Path
+from typing import Optional
 
-app = FastAPI(title="DPF Soot Load Prediction API")
+from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, Field
 
+from api.rag.context_builder import build_feature_context, build_rag_query
+from api.rag.knowledge_base import retrieve
+from api.llm.explainer import generate_explanation
 
-# =====================================================
-# Paths
-# =====================================================
+# ── App Setup ────────────────────────────────────────────────────────────────
+app = FastAPI(
+    title="DPF Telemetry ML + LLM API",
+    description="Predicts DPF soot load and generates AI-powered explanations",
+    version="2.0.0",
+)
 
-MODEL_DIR = Path("models")
+# Serve static frontend
+STATIC_DIR = Path(__file__).parent / "static"
+STATIC_DIR.mkdir(exist_ok=True)
 
+# ── Model Loading ─────────────────────────────────────────────────────────────
+MODEL_DIR = Path(__file__).parent.parent / "models"
 
-# =====================================================
-# Safe model loading (prevents CI crashes)
-# =====================================================
+_regressor = None
+_classifier = None
 
-def safe_load(path, default=None):
+def load_models():
+    global _regressor, _classifier
+    reg_path = MODEL_DIR / "regressor.pkl"
+    clf_path = MODEL_DIR / "classifier.pkl"
+
+    if not reg_path.exists() or not clf_path.exists():
+        raise FileNotFoundError(
+            f"Model files not found in {MODEL_DIR}. "
+            "Run: python models/train.py"
+        )
+    _regressor = joblib.load(reg_path)
+    _classifier = joblib.load(clf_path)
+
+@app.on_event("startup")
+async def startup_event():
     try:
-        return joblib.load(path)
-    except Exception:
-        return default
+        load_models()
+    except FileNotFoundError as e:
+        print(f"⚠️  Warning: {e}")
+        print("   API will run but predictions will return mock data.")
 
+# ── Request / Response Schemas ────────────────────────────────────────────────
+class TelemetryInput(BaseModel):
+    engine_load: float = Field(..., ge=0.0, le=1.0, description="Engine load (0.0–1.0)")
+    rpm: float = Field(..., ge=0, le=8000, description="Engine RPM")
+    speed: float = Field(..., ge=0, le=300, description="Vehicle speed km/h")
+    exhaust_temp_pre: float = Field(..., ge=0, le=900, description="Pre-DPF exhaust temp °C")
+    exhaust_temp_post: float = Field(..., ge=0, le=900, description="Post-DPF exhaust temp °C")
+    flow_rate: float = Field(..., ge=0, le=500, description="Exhaust flow rate g/s")
+    ambient_temp: float = Field(..., ge=-40, le=60, description="Ambient temperature °C")
+    temp_roll_mean_10: float = Field(..., description="Rolling mean exhaust temp (10 min) °C")
+    temp_roll_mean_60: float = Field(..., description="Rolling mean exhaust temp (60 min) °C")
+    temp_delta: float = Field(..., description="Temp delta (instantaneous - rolling mean) °C")
+    # --- derived state flags ---
+    is_regen: int = Field(..., ge=0, le=1, description="Is active regeneration occurring? (0 or 1)")
+    idle: int = Field(..., ge=0, le=1, description="Is engine idling? (0 or 1)")
+    high_load: int = Field(..., ge=0, le=1, description="Is engine under high load? (0 or 1)")
+    # --- ratio features ---
+    idle_ratio_30: float = Field(..., ge=0.0, le=1.0, description="Fraction of last 30 min at idle")
+    high_load_ratio_30: float = Field(..., ge=0.0, le=1.0, description="Fraction of last 30 min at high load")
+    # --- trip features ---
+    trip_duration_min: float = Field(..., ge=0, description="Current trip duration in minutes")
+    trip_avg_speed: float = Field(..., ge=0, le=300, description="Average speed this trip km/h")
 
-reg_model = safe_load(MODEL_DIR / "regressor.pkl")
-clf_model = safe_load(MODEL_DIR / "classifier.pkl")
-feature_cols = safe_load(MODEL_DIR / "feature_cols.pkl", [])
-
-
-# =====================================================
-# Metrics loading (⭐ ALWAYS expose regression keys)
-# =====================================================
-
-try:
-    with open(MODEL_DIR / "metrics.json") as f:
-        metrics = json.load(f)
-
-except Exception:
-    # ⭐ CI-safe default schema
-    metrics = {
-        "regression": {},
-        "classification": {}
-    }
-
-
-# =====================================================
-# Feature preparation (training == inference)
-# =====================================================
-
-def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
-
-    # safety clipping
-    df["speed"] = df["speed"].clip(0, 120)
-    df["rpm"] = df["rpm"].clip(500, 4000)
-
-    # derived features
-    df["idle"] = (df["speed"] < 5).astype(int)
-    df["high_load"] = (df["engine_load"] > 0.7).astype(int)
-    df["is_regen"] = 0
-
-    # enforce exact schema
-    df = df.reindex(columns=feature_cols, fill_value=0)
-
-    return df
-
-
-# =====================================================
-# RandomForest uncertainty
-# =====================================================
-
-def predict_with_uncertainty(df):
-    
-    # RandomForest case
-    if hasattr(reg_model, "estimators_"):
-        tree_preds = np.array([t.predict(df)[0] for t in reg_model.estimators_])
-        mean = tree_preds.mean()
-        std = tree_preds.std()
-        ci = 1.96 * std
-        return mean, ci
-
-    # XGBoost (fallback)
-    else:
-        pred = reg_model.predict(df)[0]
-        return pred, 0.0
-
-
-# =====================================================
-# Health endpoint
-# =====================================================
-
-@app.get("/health")
-def health():
-    return {
-        "status": "ok",
-        "reg_model_loaded": reg_model is not None,
-        "clf_model_loaded": clf_model is not None,
-        "timestamp": str(datetime.utcnow())
-    }
-
-
-# =====================================================
-# Model info (CI expects regression key)
-# =====================================================
-
-@app.get("/model/info")
-def model_info():
-    return {
-        "model_type": "RandomForest",
-        **metrics,  # ⭐ flatten so regression/classification exist
-        "feature_count": len(feature_cols),
-        "timestamp": str(datetime.utcnow())
-    }
-
-
-# =====================================================
-# Validation
-# =====================================================
-
-REQUIRED_COLS = [
-    "engine_load", "rpm", "speed",
-    "exhaust_temp_pre", "exhaust_temp_post",
-    "flow_rate", "ambient_temp", "diff_pressure",
-    "temp_roll_mean_10", "temp_roll_mean_60",
-    "temp_delta", "minutes_since_regen",
-    "idle_ratio_30", "high_load_ratio_30"
+# Must match model's feature_names_in_ exactly
+FEATURE_ORDER = [
+    "engine_load", "rpm", "speed", "exhaust_temp_pre", "exhaust_temp_post",
+    "flow_rate", "ambient_temp", "temp_roll_mean_10", "temp_roll_mean_60",
+    "temp_delta", "is_regen", "idle", "high_load",
+    "idle_ratio_30", "high_load_ratio_30", "trip_duration_min", "trip_avg_speed",
 ]
 
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+@app.get("/")
+async def serve_frontend():
+    index_path = STATIC_DIR / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
+    return JSONResponse({"message": "DPF Telemetry API v2.0 — frontend not found"})
 
-def validate_payload(data: dict):
-
-    missing = [c for c in REQUIRED_COLS if c not in data]
-
-    if missing:
-        # ⭐ tests expect 422
-        raise HTTPException(
-            status_code=422,
-            detail=f"Missing fields: {missing}"
-        )
-
-
-# =====================================================
-# Single prediction
-# =====================================================
-
-@app.post("/predict/soot-load")
-def predict_single(data: dict = Body(...)):
-
-    if reg_model is None or clf_model is None:
-        raise HTTPException(503, "Models not loaded")
-
-    validate_payload(data)
-
-    df = pd.DataFrame([data])
-    df = prepare_features(df)
-
-    soot_mean, soot_ci = predict_with_uncertainty(df)
-    regen_pred = int(clf_model.predict(df)[0])
-
-    soot_value = max(0.0, min(1.0, float(soot_mean)))
-
+@app.get("/health")
+async def health():
     return {
-        "soot_load_percent": round(soot_value * 100, 2),
-        "confidence_interval": round(float(soot_ci) * 100, 2) if soot_ci is not None else 0.0,
-        "regen_recommended": bool(regen_pred)
+        "status": "ok",
+        "models_loaded": _regressor is not None,
+        "version": "2.0.0"
     }
 
+@app.post("/predict/soot-load")
+async def predict_soot_load(data: TelemetryInput):
+    """Original prediction endpoint (ML only, no LLM)."""
+    prediction = _run_ml_prediction(data)
+    return prediction
 
-# =====================================================
-# Batch prediction
-# =====================================================
+@app.post("/predict/explain")
+async def predict_with_explanation(data: TelemetryInput):
+    """
+    Full pipeline: ML prediction → Feature Context → RAG → LLM explanation.
+    Returns prediction + AI-generated explanation.
+    """
+    # Step 1: ML Prediction
+    prediction = _run_ml_prediction(data)
 
-@app.post("/predict/batch")
-def predict_batch(data: list = Body(...)):
+    # Step 2: Build feature context
+    inputs_dict = data.model_dump()
+    feature_context = build_feature_context(inputs_dict, prediction)
 
-    if reg_model is None or clf_model is None:
-        raise HTTPException(503, "Models not loaded")
+    # Step 3: RAG retrieval
+    rag_query = build_rag_query(inputs_dict, prediction)
+    rag_chunks = retrieve(rag_query, top_k=5)
 
-    df = pd.DataFrame(data)
-    df = prepare_features(df)
+    # Step 4: LLM explanation
+    llm_result = await generate_explanation(feature_context, rag_chunks, prediction)
 
-    results = []
+    return {
+        **prediction,
+        "feature_context": feature_context,
+        "rag_chunks_used": rag_chunks,
+        "explanation": llm_result["explanation"],
+        "model_used": llm_result["model_used"],
+    }
 
-    for i in range(len(df)):
-        row = df.iloc[[i]]
+# ── ML Prediction Helper ──────────────────────────────────────────────────────
+def _run_ml_prediction(data: TelemetryInput) -> dict:
+    if _regressor is None or _classifier is None:
+        # Mock prediction for demo when models aren't trained yet
+        import random
+        soot = round(random.uniform(20, 95), 1)
+        return {
+            "soot_load_percent": soot,
+            "confidence_interval": round(random.uniform(2, 8), 1),
+            "regen_recommended": soot > 70,
+            "_note": "Mock prediction — run models/train.py to use real models"
+        }
 
-        mean, ci = predict_with_uncertainty(row)
-        regen = int(clf_model.predict(row)[0])
+    feature_vec = np.array([[getattr(data, f) for f in FEATURE_ORDER]])
 
-        results.append({
-            "soot_load_percent": round(mean * 100, 2),
-            "confidence_interval": round(ci * 100, 2),
-            "regen_recommended": bool(regen)
-        })
+    soot_load = float(np.clip(_regressor.predict(feature_vec)[0], 0, 100))
 
-    return {"predictions": results}
+    if hasattr(_classifier, "predict_proba"):
+        regen_proba = float(_classifier.predict_proba(feature_vec)[0][1])
+        regen_recommended = regen_proba > 0.5
+    else:
+        regen_recommended = bool(_classifier.predict(feature_vec)[0])
+        regen_proba = 1.0 if regen_recommended else 0.0
+
+    # Confidence interval via RF tree variance
+    if hasattr(_regressor, "estimators_"):
+        tree_preds = np.array([t.predict(feature_vec)[0] for t in _regressor.estimators_])
+        ci = float(np.std(tree_preds) * 1.96)
+    else:
+        ci = 0.0
+
+    return {
+        "soot_load_percent": round(soot_load, 2),
+        "confidence_interval": round(ci, 2),
+        "regen_recommended": regen_recommended,
+        "regen_probability": round(regen_proba, 3),
+    }
+
+# ── Mount static AFTER routes ─────────────────────────────────────────────────
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

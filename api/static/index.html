@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DPF Telemetry Analyzer</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Barlow+Condensed:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0c0f; --surface: #111318; --surface2: #181c22;
+    --border: #252a33; --border-bright: #3a4150;
+    --text: #c8d0dc; --text-dim: #5a6478; --text-bright: #eef1f6;
+    --accent: #00d4aa; --accent-dim: rgba(0,212,170,0.12); --accent-glow: rgba(0,212,170,0.4);
+    --warn: #f5a623; --warn-dim: rgba(245,166,35,0.12);
+    --danger: #e8394d; --danger-dim: rgba(232,57,77,0.12);
+    --ok: #3dd68c; --ok-dim: rgba(61,214,140,0.1);
+    --mono: 'JetBrains Mono', monospace; --display: 'Barlow Condensed', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 13px; min-height: 100vh; overflow-x: hidden; }
+  body::before { content: ''; position: fixed; inset: 0; background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px); pointer-events: none; z-index: 1000; }
+
+  /* Header */
+  header { border-bottom: 1px solid var(--border); padding: 16px 32px; display: flex; align-items: center; gap: 16px; background: var(--surface); }
+  .logo-mark { width: 36px; height: 36px; border: 1.5px solid var(--accent); display: grid; place-items: center; font-family: var(--display); font-weight: 700; font-size: 14px; color: var(--accent); letter-spacing: 1px; box-shadow: 0 0 12px var(--accent-glow), inset 0 0 8px var(--accent-dim); }
+  .header-title { font-family: var(--display); font-weight: 700; font-size: 20px; color: var(--text-bright); letter-spacing: 2px; text-transform: uppercase; }
+  .header-sub { font-size: 11px; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; margin-top: 2px; }
+  .header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .status-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
+
+  /* Layout */
+  .layout { display: grid; grid-template-columns: 1fr 420px; min-height: calc(100vh - 69px); }
+
+  /* Form panel */
+  .form-panel { padding: 32px; border-right: 1px solid var(--border); overflow-y: auto; }
+  .panel-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .panel-tag { font-family: var(--display); font-size: 11px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: var(--accent); background: var(--accent-dim); border: 1px solid rgba(0,212,170,0.25); padding: 3px 8px; }
+  .panel-title { font-family: var(--display); font-size: 18px; font-weight: 600; color: var(--text-bright); letter-spacing: 1px; }
+
+  /* Guide banner */
+  .guide-banner { background: var(--surface2); border: 1px solid var(--border); padding: 12px 16px; margin-bottom: 24px; font-size: 11px; color: var(--text-dim); line-height: 1.7; }
+  .guide-banner strong { color: var(--accent); font-weight: 500; }
+
+  /* Field groups */
+  .field-group { margin-bottom: 28px; }
+  .group-label { font-family: var(--display); font-size: 12px; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; color: var(--text-dim); border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 16px; }
+  .fields-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 18px; }
+
+  /* Individual field */
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field-label-row { display: flex; align-items: center; gap: 5px; }
+  .field-label-row label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
+  .field-unit { color: var(--accent); font-size: 10px; margin-left: 2px; }
+
+  /* Tooltip */
+  .tip-icon { display: none; }
+  .field-hint {
+    font-size: 10.5px;
+    color: var(--text-dim);
+    line-height: 1.6;
+    border-left: 2px solid var(--border);
+    padding: 4px 0 4px 8px;
+    margin-top: 2px;
+    transition: border-color 0.15s;
+  }
+  .field:focus-within .field-hint { border-color: var(--accent); }
+
+  /* Inputs */
+  .field input[type="number"], .field select {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text-bright);
+    font-family: var(--mono); font-size: 13px; padding: 9px 12px; outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s; width: 100%;
+    -moz-appearance: textfield;
+  }
+  .field input::-webkit-inner-spin-button, .field input::-webkit-outer-spin-button { -webkit-appearance: none; }
+  .field input:focus, .field select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
+  .field select { cursor: pointer; }
+
+  /* Sliders */
+  .field.has-slider { gap: 4px; }
+  .slider-row { display: flex; align-items: center; gap: 8px; }
+  .field input[type="range"] { flex: 1; padding: 0; height: 2px; cursor: pointer; -webkit-appearance: none; background: var(--border); border: none; box-shadow: none; }
+  .field input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: var(--accent); border-radius: 0; cursor: pointer; box-shadow: 0 0 6px var(--accent-glow); }
+  .field input[type="range"]:focus { box-shadow: none; border-color: transparent; }
+  .slider-val { font-size: 12px; color: var(--accent); width: 48px; text-align: right; }
+
+  /* Presets */
+  .presets-label { font-size: 11px; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; }
+  .presets { display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
+  .preset-btn { font-family: var(--mono); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; padding: 6px 12px; background: transparent; border: 1px solid var(--border); color: var(--text-dim); cursor: pointer; transition: all 0.15s; }
+  .preset-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+
+  /* Submit */
+  .submit-row { margin-top: 24px; display: flex; gap: 12px; align-items: center; }
+  .btn-analyze { font-family: var(--display); font-size: 15px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; padding: 14px 36px; background: var(--accent); color: #000; border: none; cursor: pointer; transition: all 0.2s; position: relative; overflow: hidden; }
+  .btn-analyze::after { content: ''; position: absolute; inset: 0; background: rgba(255,255,255,0.15); transform: translateX(-100%); transition: transform 0.3s; }
+  .btn-analyze:hover::after { transform: translateX(0); }
+  .btn-analyze:disabled { background: var(--border); color: var(--text-dim); cursor: not-allowed; }
+  .btn-analyze:disabled::after { display: none; }
+  .btn-reset { font-family: var(--mono); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; padding: 14px 20px; background: transparent; border: 1px solid var(--border); color: var(--text-dim); cursor: pointer; transition: all 0.15s; }
+  .btn-reset:hover { border-color: var(--danger); color: var(--danger); }
+  .loading-text { font-size: 11px; color: var(--text-dim); letter-spacing: 1px; display: none; }
+
+  /* Results panel */
+  .results-panel { background: var(--surface); display: flex; flex-direction: column; overflow-y: auto; }
+  .results-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; color: var(--text-dim); padding: 40px; text-align: center; }
+  .empty-icon { font-size: 48px; opacity: 0.3; }
+  .empty-text { font-size: 12px; letter-spacing: 1px; text-transform: uppercase; line-height: 1.8; }
+
+  /* Gauge */
+  .gauge-section { padding: 28px 28px 20px; border-bottom: 1px solid var(--border); }
+  .gauge-label { font-family: var(--display); font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 16px; }
+  .gauge-bar-outer { height: 8px; background: var(--surface2); border: 1px solid var(--border); position: relative; margin-bottom: 8px; }
+  .gauge-bar-fill { height: 100%; transition: width 1s cubic-bezier(0.4,0,0.2,1), background 0.5s; position: relative; }
+  .gauge-bar-fill::after { content: ''; position: absolute; right: 0; top: -3px; width: 2px; height: 14px; background: inherit; box-shadow: 0 0 8px currentColor; }
+  .gauge-ticks { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim); margin-bottom: 16px; }
+  .gauge-value { font-family: var(--display); font-size: 64px; font-weight: 700; line-height: 1; letter-spacing: -2px; color: var(--text-bright); margin-bottom: 4px; }
+  .gauge-value span { font-size: 24px; font-weight: 300; color: var(--text-dim); letter-spacing: 0; }
+  .gauge-severity { display: inline-flex; align-items: center; gap: 6px; font-family: var(--display); font-size: 13px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; padding: 4px 10px; border: 1px solid; }
+
+  /* Metrics */
+  .metrics-row { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border); }
+  .metric-cell { padding: 16px 20px; border-right: 1px solid var(--border); }
+  .metric-cell:last-child { border-right: none; }
+  .metric-label { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 6px; }
+  .metric-value { font-family: var(--display); font-size: 22px; font-weight: 600; color: var(--text-bright); }
+  .metric-value.ok { color: var(--ok); }
+  .metric-value.warn { color: var(--warn); }
+  .metric-value.danger { color: var(--danger); }
+
+  /* Explanation */
+  .explanation-section { padding: 24px 28px; flex: 1; }
+  .explanation-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .explanation-title { font-family: var(--display); font-size: 13px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim); }
+  .model-badge { margin-left: auto; font-size: 10px; color: var(--text-dim); background: var(--surface2); border: 1px solid var(--border); padding: 2px 8px; font-family: var(--mono); }
+  .explanation-text { font-size: 13px; line-height: 1.8; color: var(--text); white-space: pre-wrap; font-family: var(--mono); }
+  .explanation-text .section-header { color: var(--accent); font-weight: 500; }
+
+  /* RAG */
+  .rag-section { padding: 0 28px 24px; }
+  .rag-toggle { font-family: var(--mono); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim); background: none; border: 1px solid var(--border); padding: 6px 12px; cursor: pointer; transition: all 0.15s; width: 100%; text-align: left; }
+  .rag-toggle:hover { border-color: var(--border-bright); color: var(--text); }
+  .rag-chunks { display: none; margin-top: 12px; border: 1px solid var(--border); padding: 12px; background: var(--bg); }
+  .rag-chunks.open { display: block; }
+  .rag-chunk { font-size: 11px; color: var(--text-dim); line-height: 1.7; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .rag-chunk:last-child { border-bottom: none; }
+  .rag-chunk::before { content: '› '; color: var(--accent); }
+
+  /* Error */
+  .error-banner { margin: 20px 28px; padding: 12px 16px; background: var(--danger-dim); border: 1px solid var(--danger); color: var(--danger); font-size: 12px; display: none; }
+
+  @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+  .results-content { animation: fadeIn 0.4s ease; }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border-bright); }
+
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    .form-panel { border-right: none; border-bottom: 1px solid var(--border); }
+    .fields-grid { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-mark">DPF</div>
+  <div>
+    <div class="header-title">Telemetry Analyzer</div>
+    <div class="header-sub">ML Prediction + AI Explanation Engine</div>
+  </div>
+  <div class="header-right">
+    <div class="status-dot"></div>
+    <div class="status-label">System Online</div>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- LEFT: Form -->
+  <div class="form-panel">
+    <div class="panel-header">
+      <div class="panel-tag">Input</div>
+      <div class="panel-title">Telemetry Parameters</div>
+    </div>
+
+    <div class="guide-banner">
+      <strong>How to use:</strong> Fill in your vehicle's current sensor readings below, then click <strong>Analyze</strong>. The ML model will predict your DPF soot level and an AI will explain what it means and what to do. Hover over any field label for a plain-English explanation. Not sure what values to enter? Use one of the <strong>scenario presets</strong> below.
+    </div>
+
+    <div class="presets-label">Quick Scenarios →</div>
+    <div class="presets">
+      <button class="preset-btn" onclick="loadPreset('highway')">🛣️ Highway</button>
+      <button class="preset-btn" onclick="loadPreset('city')">🏙️ City</button>
+      <button class="preset-btn" onclick="loadPreset('critical')">🔴 Critical</button>
+      <button class="preset-btn" onclick="loadPreset('regen')">♻️ Regenerating</button>
+    </div>
+
+    <form id="telemetryForm">
+
+      <!-- GROUP 1: Engine -->
+      <div class="field-group">
+        <div class="group-label">Engine Conditions</div>
+        <div class="fields-grid">
+
+          <div class="field has-slider">
+            <div class="field-label-row">
+              <label>Engine Load <span class="field-unit">0.0–1.0</span></label>
+              <i class="tip-icon">?</i>
+            </div>
+            <div class="field-hint">How hard the engine is working. 0.0 = fully idle (no load), 1.0 = maximum load (e.g. towing uphill). At 0.6 = 60% of max capacity. You can read this from an OBD-II scanner.</div>
+            <div class="slider-row">
+              <input type="range" min="0" max="1" step="0.01" id="engine_load_slider" oninput="syncSlider('engine_load')">
+              <span class="slider-val" id="engine_load_display">0.60</span>
+            </div>
+            <input type="number" id="engine_load" name="engine_load" value="0.60" step="0.01" min="0" max="1" oninput="syncInput('engine_load')" required>
+          </div>
+
+          <div class="field">
+            <div class="field-label-row">
+              <label>RPM <span class="field-unit">rpm</span></label>
+              <i class="tip-icon">?</i>
+            </div>
+            <div class="field-hint">Engine revolutions per minute — visible on your dashboard tachometer. Idle ≈ 700–900 rpm. City driving ≈ 1000–1800. Highway ≈ 1800–2800. High RPM = more exhaust heat = better DPF regeneration.</div>
+            <input type="number" id="rpm" name="rpm" value="2000" step="50" min="0" max="8000" required>
+          </div>
+
+          <div class="field has-slider">
+            <div class="field-label-row">
+              <label>Vehicle Speed <span class="field-unit">km/h</span></label>
+              <i class="tip-icon">?</i>
+            </div>
+            <div class="field-hint">Current speed in km/h. City driving = 0–50. Suburban = 50–80. Highway = 80+. Highway speeds are critical for DPF health — they keep exhaust temps high enough to burn soot.</div>
+            <div class="slider-row">
+              <input type="range" min="0" max="200" step="1" id="speed_slider" oninput="syncSlider('speed')">
+              <span class="slider-val" id="speed_display">60</span>
+            </div>
+            <input type="number" id="speed" name="speed" value="60" step="1" min="0" max="300" oninput="syncInput('speed')" required>
+          </div>
+
+          <div class="field">
+            <div class="field-label-row">
+              <label>Ambient Temp <span class="field-unit">°C</span></label>
+              <i class="tip-icon">?</i>
+            </div>
+            <div class="field-hint">Outside air temperature in Celsius. Cold weather (below 5°C) makes it harder for the DPF to reach regeneration temperatures, causing faster soot buildup.</div>
+            <input type="number" id="ambient_temp" name="ambient_temp" value="25" step="1" min="-40" max="60" required>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- GROUP 2: Exhaust -->
+      <div class="field-group">
+        <div class="group-label">Exhaust System</div>
+        <div class="fields-grid">
+
+          <div class="field">
+            <div class="field-label-row">
+              <label>Exhaust Temp Pre-DPF <span class="field-unit">°C</span></label>
+              <i class="tip-icon">?</i>
+            </div>
+            <div class="field-hint">Temperature of exhaust gases BEFORE entering the DPF filter. This is the most important regeneration indicator. Below 300°C = soot builds up. Above 550°C = soot starts burning (passive regeneration). Above 600°C = active regeneration.</div>
+            <input type="number" id="exhaust_temp_pre" name="exhaust_temp_pre" value="480" step="5" min="0" max="900" required>
+          </div>
+
+          <div class="field">
+            <div class="field-label-row">
+              <label>Exhaust Temp Post-DPF <span class="field-unit">°C</span></label>
+              <i class="tip-icon">?</i>
+            </div>
+            <div class="field-hint">Temperature AFTER the DPF filter. Normally slightly lower than pre-DPF. If post is much lower than pre, it means the DPF is absorbing heat (filtering soot). A small gap means less filtering happening.</div>
+            <input type="number" id="exhaust_temp_post" name="exhaust_temp_post" value="450" step="5" min="0" max="900" required>
+          </div>
+
+          <div class="field">
+            <div class="field-label-row">
+              <label>Flow Rate <span class="field-unit">g/s</span></label>
+              <i class="tip-icon">?</i>
+            </div>
+            <div class="field-hint">Mass of exhaust gas flowing through the system per second. Low flow (under 20 g/s) = idle or very light load, not enough energy for regeneration. High flow (over 80 g/s) combined with high temperature = ideal regeneration conditions.</div>
+            <input type="number" id="flow_rate" name="flow_rate" value="48" step="1" min="0" max="500" required>
+          </div>
+
+          <div class="field">
+            <div class="field-label-row">
+              <label>Temp Delta <span class="field-unit">°C</span></label>
+              <i class="tip-icon">?</i>
+            </div>
+            <div class="field-hint">Difference between the current exhaust temperature and its rolling average. Positive = temperature is rising (e.g. after acceleration). Negative = cooling down (e.g. after slowing down or idling). Large positive values suggest recent high-load driving.</div>
+            <input type="number" id="temp_delta" name="temp_delta" value="20" step="1" required>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- GROUP 3: State Flags -->
+      <div class="field-group">
+        <div class="group-label">State Flags</div>
+        <div class="fields-grid">
+
+          <div class="field">
+            <div class="field-label-row">
+              <label>Is Regenerating? <span class="field-unit">0 or 1</span></label>
+              <i class="tip-icon">?</i>
+            </div>
+            <div class="field-hint">Is the DPF currently in an active regeneration cycle? Your dashboard may show a DPF warning or regeneration indicator light. If you're unsure, select 0 (No). An OBD-II scanner can confirm this.</div>
+            <select id="is_regen" name="is_regen" class="flag-select">
+              <option value="0">0 — No, not regenerating</option>
+              <option value="1">1 — Yes, actively regenerating</option>
+            </select>
+            <div class="field-hint">Active regen = the ECU is injecting extra fuel post-combustion to raise exhaust temp above 600°C to burn soot.</div>
+          </div>
+
+          <div class="field">
+            <div class="field-label-row">
+              <label>Is Idling? <span class="field-unit">0 or 1</span></label>
+              <i class="tip-icon">?</i>
+            </div>
+            <div class="field-hint">Is the engine running but the vehicle stationary (speed ≈ 0, RPM ≈ 700–900)? Extended idling is the #1 cause of DPF clogging — exhaust temps are too low to burn soot. Set to 1 if you've been sitting still with engine on.</div>
+            <select id="idle" name="idle" class="flag-select">
+              <option value="0">0 — No, vehicle is moving</option>
+              <option value="1">1 — Yes, engine idling</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <div class="field-label-row">
+              <label>Is High Load? <span class="field-unit">0 or 1</span></label>
+              <i class="tip-icon">?</i>
+            </div>
+            <div class="field-hint">Is the engine under sustained high load? (e.g. towing, driving uphill, accelerating hard). High load = engine_load above 0.70. This is actually good for the DPF — it keeps exhaust temps high enough for regeneration.</div>
+            <select id="high_load" name="high_load" class="flag-select">
+              <option value="0">0 — No, normal load</option>
+              <option value="1">1 — Yes, high load</option>
+            </select>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- GROUP 4: Trip Info -->
+      <div class="field-group">
+        <div class="group-label">Trip Info</div>
+        <div class="fields-grid">
+
+          <div class="field">
+            <div class="field-label-row">
+              <label>Trip Duration <span class="field-unit">minutes</span></label>
+              <i class="tip-icon">?</i>
+            </div>
+            <div class="field-hint">How long this current trip has been running in minutes. Short trips (under 15 min) are bad for the DPF — the engine never fully warms up and exhaust temps stay too low for regeneration. Enter 0 if just started.</div>
+            <input type="number" id="trip_duration_min" name="trip_duration_min" value="20" step="1" min="0" required>
+          </div>
+
+          <div class="field">
+            <div class="field-label-row">
+              <label>Trip Avg Speed <span class="field-unit">km/h</span></label>
+              <i class="tip-icon">?</i>
+            </div>
+            <div class="field-hint">Average speed across this entire trip in km/h. This tells the model your driving pattern — a low average (under 30) = mostly stop-and-go city driving. Above 60 = mixed or highway. This significantly impacts soot accumulation rate.</div>
+            <input type="number" id="trip_avg_speed" name="trip_avg_speed" value="45" step="1" min="0" max="300" required>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- GROUP 5: Rolling Averages -->
+      <div class="field-group">
+        <div class="group-label">Rolling Averages (Last 30 min behaviour)</div>
+        <div class="fields-grid">
+
+          <div class="field">
+            <div class="field-label-row">
+              <label>Temp Roll Mean 10min <span class="field-unit">°C</span></label>
+              <i class="tip-icon">?</i>
+            </div>
+            <div class="field-hint">Average exhaust temperature over the last 10 minutes. If this is much higher than the 60-min average, it means you recently started driving harder. If it's lower, you've been decelerating or idling recently.</div>
+            <input type="number" id="temp_roll_mean_10" name="temp_roll_mean_10" value="465" step="5" required>
+          </div>
+
+          <div class="field">
+            <div class="field-label-row">
+              <label>Temp Roll Mean 60min <span class="field-unit">°C</span></label>
+              <i class="tip-icon">?</i>
+            </div>
+            <div class="field-hint">Average exhaust temperature over the last 60 minutes. This captures your overall driving style for the trip. Below 350°C average = predominantly cold city driving. Above 450°C = sustained highway or mixed driving. Key indicator for regeneration potential.</div>
+            <input type="number" id="temp_roll_mean_60" name="temp_roll_mean_60" value="450" step="5" required>
+          </div>
+
+          <div class="field has-slider">
+            <div class="field-label-row">
+              <label>Idle Ratio 30min <span class="field-unit">0.0–1.0</span></label>
+              <i class="tip-icon">?</i>
+            </div>
+            <div class="field-hint">Fraction of the last 30 minutes spent idling (speed ≈ 0, engine on). 0.0 = no idling at all. 0.5 = half the time idling. 0.8 = mostly stationary. High idle ratio is the biggest single predictor of soot buildup.</div>
+            <div class="slider-row">
+              <input type="range" min="0" max="1" step="0.01" id="idle_ratio_30_slider" oninput="syncSlider('idle_ratio_30')">
+              <span class="slider-val" id="idle_ratio_30_display">0.10</span>
+            </div>
+            <input type="number" id="idle_ratio_30" name="idle_ratio_30" value="0.10" step="0.01" min="0" max="1" oninput="syncInput('idle_ratio_30')" required>
+          </div>
+
+          <div class="field has-slider">
+            <div class="field-label-row">
+              <label>High Load Ratio 30min <span class="field-unit">0.0–1.0</span></label>
+              <i class="tip-icon">?</i>
+            </div>
+            <div class="field-hint">Fraction of the last 30 minutes spent at high engine load (above 70% load). 0.0 = no high-load moments. 0.7 = 70% of time at high load (e.g. highway driving or towing). Higher values are associated with better DPF health.</div>
+            <div class="slider-row">
+              <input type="range" min="0" max="1" step="0.01" id="high_load_ratio_30_slider" oninput="syncSlider('high_load_ratio_30')">
+              <span class="slider-val" id="high_load_ratio_30_display">0.50</span>
+            </div>
+            <input type="number" id="high_load_ratio_30" name="high_load_ratio_30" value="0.50" step="0.01" min="0" max="1" oninput="syncInput('high_load_ratio_30')" required>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="submit-row">
+        <button type="submit" class="btn-analyze" id="submitBtn">Analyze</button>
+        <button type="button" class="btn-reset" onclick="resetForm()">Reset</button>
+        <span class="loading-text" id="loadingText">⟳ Processing...</span>
+      </div>
+    </form>
+  </div>
+
+  <!-- RIGHT: Results -->
+  <div class="results-panel" id="resultsPanel">
+    <div class="results-empty" id="emptyState">
+      <div class="empty-icon">◈</div>
+      <div class="empty-text">
+        Enter telemetry values<br>and click Analyze<br>to get ML prediction<br>+ AI explanation
+      </div>
+    </div>
+
+    <div id="resultsContent" style="display:none;" class="results-content">
+      <div class="gauge-section">
+        <div class="gauge-label">DPF Soot Load</div>
+        <div class="gauge-bar-outer">
+          <div class="gauge-bar-fill" id="gaugeFill" style="width:0%"></div>
+        </div>
+        <div class="gauge-ticks">
+          <span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span>
+        </div>
+        <div class="gauge-value" id="sootValue">—<span>%</span></div>
+        <div class="gauge-severity" id="severityBadge">—</div>
+      </div>
+
+      <div class="metrics-row">
+        <div class="metric-cell">
+          <div class="metric-label">Regeneration</div>
+          <div class="metric-value" id="regenValue">—</div>
+        </div>
+        <div class="metric-cell">
+          <div class="metric-label">Confidence ±</div>
+          <div class="metric-value" id="ciValue">—</div>
+        </div>
+      </div>
+
+      <div class="error-banner" id="errorBanner"></div>
+
+      <div class="explanation-section">
+        <div class="explanation-header">
+          <div class="explanation-title">AI Analysis</div>
+          <div class="model-badge" id="modelBadge">—</div>
+        </div>
+        <div class="explanation-text" id="explanationText">—</div>
+      </div>
+
+      <div class="rag-section">
+        <button class="rag-toggle" onclick="toggleRag()">▸ Show Retrieved Knowledge Context</button>
+        <div class="rag-chunks" id="ragChunks"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const SLIDER_FIELDS = ['engine_load', 'speed', 'idle_ratio_30', 'high_load_ratio_30'];
+
+function syncSlider(field) {
+  const slider = document.getElementById(field + '_slider');
+  const input = document.getElementById(field);
+  const display = document.getElementById(field + '_display');
+  input.value = slider.value;
+  display.textContent = parseFloat(slider.value).toFixed(field === 'speed' ? 0 : 2);
+}
+
+function syncInput(field) {
+  const slider = document.getElementById(field + '_slider');
+  const input = document.getElementById(field);
+  const display = document.getElementById(field + '_display');
+  if (slider) {
+    slider.value = input.value;
+    display.textContent = parseFloat(input.value).toFixed(field === 'speed' ? 0 : 2);
+  }
+}
+
+function initSliders() {
+  SLIDER_FIELDS.forEach(field => {
+    const input = document.getElementById(field);
+    const slider = document.getElementById(field + '_slider');
+    const display = document.getElementById(field + '_display');
+    if (slider && input && display) {
+      slider.value = input.value;
+      display.textContent = parseFloat(input.value).toFixed(field === 'speed' ? 0 : 2);
+    }
+  });
+}
+
+const PRESETS = {
+  highway: {
+    engine_load: 0.65, rpm: 2400, speed: 110, exhaust_temp_pre: 540,
+    exhaust_temp_post: 510, flow_rate: 72, ambient_temp: 22,
+    temp_roll_mean_10: 530, temp_roll_mean_60: 490, temp_delta: 50,
+    is_regen: 0, idle: 0, high_load: 1,
+    idle_ratio_30: 0.02, high_load_ratio_30: 0.70,
+    trip_duration_min: 45, trip_avg_speed: 98
+  },
+  city: {
+    engine_load: 0.28, rpm: 1100, speed: 22, exhaust_temp_pre: 280,
+    exhaust_temp_post: 260, flow_rate: 18, ambient_temp: 30,
+    temp_roll_mean_10: 290, temp_roll_mean_60: 310, temp_delta: -20,
+    is_regen: 0, idle: 1, high_load: 0,
+    idle_ratio_30: 0.45, high_load_ratio_30: 0.08,
+    trip_duration_min: 12, trip_avg_speed: 18
+  },
+  critical: {
+    engine_load: 0.20, rpm: 850, speed: 8, exhaust_temp_pre: 190,
+    exhaust_temp_post: 175, flow_rate: 10, ambient_temp: 5,
+    temp_roll_mean_10: 200, temp_roll_mean_60: 220, temp_delta: -30,
+    is_regen: 0, idle: 1, high_load: 0,
+    idle_ratio_30: 0.80, high_load_ratio_30: 0.02,
+    trip_duration_min: 8, trip_avg_speed: 6
+  },
+  regen: {
+    engine_load: 0.82, rpm: 2800, speed: 95, exhaust_temp_pre: 640,
+    exhaust_temp_post: 590, flow_rate: 95, ambient_temp: 18,
+    temp_roll_mean_10: 620, temp_roll_mean_60: 550, temp_delta: 90,
+    is_regen: 1, idle: 0, high_load: 1,
+    idle_ratio_30: 0.00, high_load_ratio_30: 0.88,
+    trip_duration_min: 32, trip_avg_speed: 88
+  }
+};
+
+function loadPreset(name) {
+  const p = PRESETS[name];
+  Object.entries(p).forEach(([k, v]) => {
+    const el = document.getElementById(k);
+    if (el) el.value = v;
+  });
+  initSliders();
+}
+
+function resetForm() {
+  document.getElementById('telemetryForm').reset();
+  initSliders();
+  document.getElementById('resultsContent').style.display = 'none';
+  document.getElementById('emptyState').style.display = 'flex';
+}
+
+document.getElementById('telemetryForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('submitBtn');
+  const loading = document.getElementById('loadingText');
+  btn.disabled = true;
+  loading.style.display = 'block';
+  document.getElementById('errorBanner').style.display = 'none';
+
+  const data = {
+    engine_load: parseFloat(document.getElementById('engine_load').value),
+    rpm: parseFloat(document.getElementById('rpm').value),
+    speed: parseFloat(document.getElementById('speed').value),
+    exhaust_temp_pre: parseFloat(document.getElementById('exhaust_temp_pre').value),
+    exhaust_temp_post: parseFloat(document.getElementById('exhaust_temp_post').value),
+    flow_rate: parseFloat(document.getElementById('flow_rate').value),
+    ambient_temp: parseFloat(document.getElementById('ambient_temp').value),
+    temp_roll_mean_10: parseFloat(document.getElementById('temp_roll_mean_10').value),
+    temp_roll_mean_60: parseFloat(document.getElementById('temp_roll_mean_60').value),
+    temp_delta: parseFloat(document.getElementById('temp_delta').value),
+    is_regen: parseInt(document.getElementById('is_regen').value),
+    idle: parseInt(document.getElementById('idle').value),
+    high_load: parseInt(document.getElementById('high_load').value),
+    idle_ratio_30: parseFloat(document.getElementById('idle_ratio_30').value),
+    high_load_ratio_30: parseFloat(document.getElementById('high_load_ratio_30').value),
+    trip_duration_min: parseFloat(document.getElementById('trip_duration_min').value),
+    trip_avg_speed: parseFloat(document.getElementById('trip_avg_speed').value),
+  };
+
+  try {
+    const response = await fetch('/predict/explain', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.detail || `HTTP ${response.status}`);
+    }
+    const result = await response.json();
+    renderResults(result);
+  } catch (err) {
+    const banner = document.getElementById('errorBanner');
+    banner.textContent = `Error: ${err.message}`;
+    banner.style.display = 'block';
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('resultsContent').style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    loading.style.display = 'none';
+  }
+});
+
+function renderResults(r) {
+  const soot = r.soot_load_percent;
+  const fill = document.getElementById('gaugeFill');
+  fill.style.width = Math.min(soot, 100) + '%';
+
+  let color, severity;
+  if (soot < 30)      { color = 'var(--ok)';     severity = '🟢 HEALTHY'; }
+  else if (soot < 60) { color = 'var(--accent)';  severity = '🟡 MODERATE'; }
+  else if (soot < 80) { color = 'var(--warn)';    severity = '🟠 HIGH'; }
+  else                { color = 'var(--danger)';  severity = '🔴 CRITICAL'; }
+
+  fill.style.background = color;
+  document.getElementById('sootValue').innerHTML = `${soot.toFixed(1)}<span>%</span>`;
+
+  const badge = document.getElementById('severityBadge');
+  badge.textContent = severity;
+  badge.style.borderColor = color;
+  badge.style.color = color;
+  badge.style.background = 'transparent';
+
+  const regenEl = document.getElementById('regenValue');
+  regenEl.textContent = r.regen_recommended ? 'REQUIRED' : 'NOT NEEDED';
+  regenEl.className = 'metric-value ' + (r.regen_recommended ? 'danger' : 'ok');
+  document.getElementById('ciValue').textContent = `±${r.confidence_interval?.toFixed(1) ?? '—'}%`;
+
+  const expText = r.explanation || 'No explanation returned.';
+  const formatted = expText.replace(/(📊 DIAGNOSIS|🔍 KEY FACTORS|✅ RECOMMENDATIONS|⏱️ URGENCY)/g, '<span class="section-header">$1</span>');
+  document.getElementById('explanationText').innerHTML = formatted;
+  document.getElementById('modelBadge').textContent = r.model_used || '—';
+
+  const ragContainer = document.getElementById('ragChunks');
+  ragContainer.innerHTML = (r.rag_chunks_used || []).map(c => `<div class="rag-chunk">${c}</div>`).join('');
+
+  document.getElementById('emptyState').style.display = 'none';
+  const rc = document.getElementById('resultsContent');
+  rc.style.display = 'block';
+  rc.classList.remove('results-content');
+  void rc.offsetWidth;
+  rc.classList.add('results-content');
+}
+
+function toggleRag() {
+  const chunks = document.getElementById('ragChunks');
+  const btn = document.querySelector('.rag-toggle');
+  chunks.classList.toggle('open');
+  btn.textContent = chunks.classList.contains('open') ? '▾ Hide Retrieved Knowledge Context' : '▸ Show Retrieved Knowledge Context';
+}
+
+initSliders();
+</script>
+</body>
+</html>
